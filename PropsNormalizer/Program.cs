@@ -1,6 +1,5 @@
 ﻿using System.Text;
 using System.Text.RegularExpressions;
-using System.Xml;
 using System.Xml.Linq;
 
 internal static class Program
@@ -22,7 +21,7 @@ internal static class Program
             var root = Path.GetFullPath(opt.RootFolder);
             if (!Directory.Exists(root))
             {
-                Console.Error.WriteLine($"[ERR] Folder not found: {root}");
+                Console.Error.WriteLine($"[ОШИБКА] Папка не найдена: {root}");
                 return 2;
             }
 
@@ -31,7 +30,7 @@ internal static class Program
 
             if (!File.Exists(packagesPath))
             {
-                Console.Error.WriteLine($"[ERR] Directory.Packages.props not found in: {root}");
+                Console.Error.WriteLine($"[ОШИБКА] В папке нет Directory.Packages.props: {root}");
                 return 2;
             }
 
@@ -42,25 +41,29 @@ internal static class Program
                 BuildPropsPath = File.Exists(buildPath) ? buildPath : null
             };
 
-            // Load XML
-            var packagesDoc = LoadXml(packagesPath);
-            XDocument? buildDoc = File.Exists(buildPath) ? LoadXml(buildPath) : null;
+            // Загружаем XML, сохраняя пробелы/переносы строк
+            var packagesDoc = LoadXmlPreserveWhitespace(packagesPath);
+            XDocument? buildDoc = File.Exists(buildPath) ? LoadXmlPreserveWhitespace(buildPath) : null;
 
-            // Collect macros from BOTH files (Build + Packages)
-            var macrosFromBuild = buildDoc is null ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                                                   : CollectVersionMacros(buildDoc);
+            // Собираем макросы версий из ОБОИХ файлов (Build + Packages)
+            var macrosFromBuild = buildDoc is null
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : CollectVersionMacros(buildDoc);
 
             var macrosFromPackagesBefore = CollectVersionMacros(packagesDoc);
 
-            // Merge: if same macro exists in both, prefer Packages (because it’s local to file we edit)
-            // (Also handy: if values differ, we track it.)
+            // Объединяем:
+            // если одинаковое имя макроса есть и там и там — предпочитаем значение из Directory.Packages.props
             var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kv in macrosFromBuild) merged[kv.Key] = kv.Value;
+
             foreach (var kv in macrosFromPackagesBefore)
             {
-                if (merged.TryGetValue(kv.Key, out var prev) && !StringComparer.OrdinalIgnoreCase.Equals(prev, kv.Value))
+                if (merged.TryGetValue(kv.Key, out var prev) &&
+                    !StringComparer.OrdinalIgnoreCase.Equals(prev, kv.Value))
+                {
                     report.MacroValueConflicts.Add((kv.Key, prev, kv.Value));
-
+                }
                 merged[kv.Key] = kv.Value;
             }
 
@@ -68,7 +71,7 @@ internal static class Program
             report.MacrosFoundInPackagesBefore = macrosFromPackagesBefore.Count;
             report.MacrosMergedTotal = merged.Count;
 
-            // Reverse index: versionValue -> [macroNames...]
+            // Обратный индекс: "значение версии" -> [имена макросов]
             var macrosByValue = merged
                 .GroupBy(kv => kv.Value, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
@@ -76,53 +79,56 @@ internal static class Program
                     g => g.Select(x => x.Key).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
                     StringComparer.OrdinalIgnoreCase);
 
-            // 1) Replace numeric PackageVersion @Version -> $(Macro) if exists
+            // 1) Заменяем числовые версии в PackageVersion на $(Macro), если найден макрос с таким значением
             NormalizePackageVersions(packagesDoc, macrosByValue, report);
 
-            // 2) Determine used macros after normalization (scan resulting XML string)
-            var packagesXmlAfterReplace = ToXmlString(packagesDoc);
+            // 2) Находим реально используемые макросы после замены (сканируем итоговый XML как текст)
+            var packagesXmlAfterReplace = packagesDoc.ToString(SaveOptions.DisableFormatting);
             var usedMacros = new HashSet<string>(
                 MacroUseRegex.Matches(packagesXmlAfterReplace).Select(m => m.Groups[1].Value),
                 StringComparer.OrdinalIgnoreCase);
 
             report.UsedMacrosAfterNormalization = usedMacros.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
 
-            // 3) Remove unused macros ONLY from Directory.Packages.props (since only it is editable)
+            // 3) Удаляем НЕиспользуемые макросы ТОЛЬКО из Directory.Packages.props
             RemoveUnusedMacrosFromPackages(packagesDoc, usedMacros, report);
 
-            // 4) Sort macro sections (PropertyGroup with version-macro elements) by macro name
-            SortMacroGroupsInPackages(packagesDoc, report);
+            // 4) Сортируем макросы в группах Directory.Packages.props по имени,
+            //    сохраняя исходные переносы/отступы (не схлопываем в одну строку).
+            SortMacroGroupsInPackagesPreserveFormatting(packagesDoc, report);
 
-            // Output paths
+            // Пути вывода
             var packagesOutPath = opt.InPlace
                 ? packagesPath
                 : Path.GetFullPath(opt.OutputPath ?? Path.Combine(root, "Directory.Packages.normalized.props"));
 
             var reportPath = Path.GetFullPath(opt.ReportPath ?? Path.Combine(root, "normalize-report.md"));
 
-            SaveXml(packagesDoc, packagesOutPath);
+            // ВАЖНО: сохраняем без переформатирования всего файла
+            SaveXmlPreserveFormatting(packagesDoc, packagesOutPath);
+
             File.WriteAllText(reportPath, report.ToMarkdown(packagesOutPath), new UTF8Encoding(false));
 
-            Console.WriteLine("[OK] Done");
-            Console.WriteLine($"     Packages: {packagesOutPath}");
-            Console.WriteLine($"     Report  : {reportPath}");
+            Console.WriteLine("[ГОТОВО] Нормализация завершена");
+            Console.WriteLine($"        Файл: {packagesOutPath}");
+            Console.WriteLine($"        Отчёт: {reportPath}");
             return 0;
         }
         catch (OptionsException ex)
         {
-            Console.Error.WriteLine($"[ARGS] {ex.Message}");
+            Console.Error.WriteLine($"[АРГУМЕНТЫ] {ex.Message}");
             Console.Error.WriteLine(Options.Usage);
             return 1;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("[ERR] Unhandled exception:");
+            Console.Error.WriteLine("[ОШИБКА] Необработанное исключение:");
             Console.Error.WriteLine(ex);
             return 99;
         }
     }
 
-    // ---------- Core logic ----------
+    // -------------------- Основная логика --------------------
 
     private static void NormalizePackageVersions(
         XDocument packagesDoc,
@@ -161,6 +167,7 @@ internal static class Program
                 continue;
             }
 
+            // Если найдено несколько макросов на одно значение — выбираем первый по алфавиту
             var chosen = macroNames[0];
             if (macroNames.Count > 1)
                 report.AmbiguousMacroMatches.Add((include, current, macroNames, chosen));
@@ -175,14 +182,12 @@ internal static class Program
         HashSet<string> usedMacros,
         Report report)
     {
-        // We treat "macro definitions" as: PropertyGroup child elements without attributes
-        // whose value looks like a version.
         var propertyGroups = packagesDoc.Descendants().Where(x => x.Name.LocalName == "PropertyGroup").ToList();
 
         foreach (var pg in propertyGroups)
         {
             var versionMacroElements = pg.Elements()
-                .Where(e => !e.HasAttributes && LooksLikeVersionRegex.IsMatch((e.Value ?? "").Trim()))
+                .Where(IsVersionMacroElement)
                 .ToList();
 
             foreach (var el in versionMacroElements)
@@ -190,84 +195,159 @@ internal static class Program
                 var name = el.Name.LocalName;
                 var value = (el.Value ?? "").Trim();
 
-                if (!usedMacros.Contains(name))
-                {
-                    el.Remove();
-                    report.RemovedUnusedMacrosFromPackages.Add((name, value));
-                }
+                if (usedMacros.Contains(name))
+                    continue;
+
+                // Удаляем "красиво": элемент + ближайший whitespace перед ним (если он только из пробелов/переносов)
+                var prevNode = el.PreviousNode;
+                el.Remove();
+
+                if (prevNode is XText xt && string.IsNullOrWhiteSpace(xt.Value))
+                    xt.Remove();
+
+                report.RemovedUnusedMacrosFromPackages.Add((name, value));
             }
 
-            // If PropertyGroup became empty (no element children), remove it to avoid empty blocks
+            // Если группа стала пустой — удаляем её и whitespace перед ней
             if (!pg.Elements().Any())
             {
-                // keep PropertyGroup if it still has non-element nodes? Usually not needed.
-                // If there are no elements at all, it’s empty for practical purposes.
+                var prev = pg.PreviousNode;
                 pg.Remove();
+
+                if (prev is XText xt && string.IsNullOrWhiteSpace(xt.Value))
+                    xt.Remove();
+
                 report.RemovedEmptyPropertyGroups++;
             }
         }
     }
 
-    private static void SortMacroGroupsInPackages(XDocument packagesDoc, Report report)
+    private static void SortMacroGroupsInPackagesPreserveFormatting(XDocument packagesDoc, Report report)
     {
         var groups = packagesDoc.Descendants().Where(x => x.Name.LocalName == "PropertyGroup").ToList();
 
         foreach (var pg in groups)
         {
-            // macro group = has at least one version-macro element
-            var macroEls = pg.Elements()
-                .Where(e => !e.HasAttributes && LooksLikeVersionRegex.IsMatch((e.Value ?? "").Trim()))
-                .ToList();
+            // Собираем "чанки" макросов: (leading whitespace текст, элемент)
+            // leading whitespace — XText перед элементом, если он только из пробелов/переносов
+            var nodes = pg.Nodes().ToList();
+            var chunks = new List<MacroChunk>();
 
-            if (macroEls.Count == 0)
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (nodes[i] is not XElement el)
+                    continue;
+
+                if (!IsVersionMacroElement(el))
+                    continue;
+
+                string? leadingWs = null;
+                if (i - 1 >= 0 && nodes[i - 1] is XText xt && string.IsNullOrWhiteSpace(xt.Value))
+                    leadingWs = xt.Value;
+
+                chunks.Add(new MacroChunk(el, leadingWs));
+            }
+
+            if (chunks.Count <= 1)
                 continue;
 
-            // If group has any non-macro elements, we do a conservative sort:
-            // sort only those macro elements, leave others as-is.
-            var otherEls = pg.Elements().Except(macroEls).ToList();
+            var before = chunks.Select(c => c.Element.Name.LocalName).ToList();
 
-            bool hasOnlyMacros = otherEls.Count == 0;
-
-            var sortedMacros = macroEls
-                .OrderBy(e => e.Name.LocalName, StringComparer.OrdinalIgnoreCase)
-                .Select(e => new XElement(e.Name, (e.Value ?? "").Trim()))
+            var sorted = chunks
+                .OrderBy(c => c.Element.Name.LocalName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            if (hasOnlyMacros)
-            {
-                var before = macroEls.Select(e => e.Name.LocalName).ToList();
-                var after = sortedMacros.Select(e => e.Name.LocalName).ToList();
-                if (!before.SequenceEqual(after, StringComparer.OrdinalIgnoreCase))
-                    report.SortedMacroGroupsCount++;
+            var after = sorted.Select(c => c.Element.Name.LocalName).ToList();
+            if (before.SequenceEqual(after, StringComparer.OrdinalIgnoreCase))
+                continue;
 
-                pg.RemoveNodes();
-                foreach (var e in sortedMacros) pg.Add(e);
+            // Находим место вставки: позиция первого элемента-макроса или его leading whitespace
+            XNode insertionAnchor = FindFirstChunkAnchor(pg, chunks[0].Element);
+
+            // Удаляем исходные элементы и их leading whitespace (если был)
+            // Удаляем whitespace именно как узел в документе, а не по строке — поэтому ищем по соседству.
+            foreach (var c in chunks)
+            {
+                var el = c.Element;
+                var prev = el.PreviousNode;
+                el.Remove();
+
+                if (prev is XText xt && string.IsNullOrWhiteSpace(xt.Value))
+                    xt.Remove();
+            }
+
+            // Вставляем отсортированные чанки перед якорем (или в конец, если якорь пропал)
+            // Поскольку узлы уже вырезаны, insertionAnchor мог быть удалён — проверяем, что он ещё в дереве.
+            if (insertionAnchor.Parent is null)
+            {
+                // fallback: просто добавляем в конец PropertyGroup
+                foreach (var c in sorted)
+                    AddChunkToEnd(pg, c);
             }
             else
             {
-                // Replace each original macro element in place using sorted order,
-                // keeping non-macro elements in the same relative positions.
-                var originalMacroNodes = pg.Elements()
-                    .Select((el, idx) => (el, idx))
-                    .Where(t => macroEls.Contains(t.el))
-                    .ToList();
-
-                var before = originalMacroNodes.Select(x => x.el.Name.LocalName).ToList();
-                var after = sortedMacros.Select(x => x.Name.LocalName).ToList();
-
-                if (!before.SequenceEqual(after, StringComparer.OrdinalIgnoreCase))
-                    report.SortedMacroGroupsCount++;
-
-                for (int i = 0; i < originalMacroNodes.Count; i++)
+                foreach (var c in sorted)
                 {
-                    var (el, _) = originalMacroNodes[i];
-                    el.ReplaceWith(sortedMacros[i]);
+                    if (c.LeadingWhitespace is not null)
+                        insertionAnchor.AddBeforeSelf(new XText(c.LeadingWhitespace));
+
+                    insertionAnchor.AddBeforeSelf(c.Element);
                 }
             }
+
+            report.SortedMacroGroupsCount++;
+        }
+
+        static XNode FindFirstChunkAnchor(XElement pg, XElement firstMacroElement)
+        {
+            // Якорь = либо leading whitespace перед первым макросом (если есть),
+            // либо сам элемент, либо последний вариант — первый узел группы.
+            var prev = firstMacroElement.PreviousNode;
+            if (prev is XText xt && string.IsNullOrWhiteSpace(xt.Value))
+                return prev;
+
+            return (XNode)firstMacroElement;
+        }
+
+        static void AddChunkToEnd(XElement pg, MacroChunk c)
+        {
+            if (c.LeadingWhitespace is not null)
+                pg.Add(new XText(c.LeadingWhitespace));
+            pg.Add(c.Element);
         }
     }
 
-    // Collect macros in a doc: name->value, where element in PropertyGroup, no attributes, value looks like version
+    private sealed class MacroChunk
+    {
+        public XElement Element { get; }
+        public string? LeadingWhitespace { get; }
+
+        public MacroChunk(XElement element, string? leadingWhitespace)
+        {
+            Element = element;
+            LeadingWhitespace = leadingWhitespace;
+        }
+    }
+
+    // Макрос версии:
+    // - элемент внутри PropertyGroup
+    // - БЕЗ атрибутов
+    // - имя оканчивается на Version
+    // - значение похоже на версию
+    private static bool IsVersionMacroElement(XElement el)
+    {
+        if (el.HasAttributes) return false;
+
+        var name = el.Name.LocalName;
+        if (!name.EndsWith("Version", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var value = (el.Value ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        return LooksLikeVersionRegex.IsMatch(value);
+    }
+
     private static Dictionary<string, string> CollectVersionMacros(XDocument doc)
     {
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -276,59 +356,30 @@ internal static class Program
         {
             foreach (var el in pg.Elements())
             {
-                if (el.HasAttributes) continue;
-
-                var name = el.Name.LocalName;
-                var value = (el.Value ?? "").Trim();
-                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(value)) continue;
-
-                if (!LooksLikeVersionRegex.IsMatch(value)) continue;
-
-                dict[name] = value;
+                if (!IsVersionMacroElement(el)) continue;
+                dict[el.Name.LocalName] = (el.Value ?? "").Trim();
             }
         }
 
         return dict;
     }
 
-    // ---------- XML helpers ----------
+    // -------------------- XML helpers --------------------
 
-    private static XDocument LoadXml(string path)
+    private static XDocument LoadXmlPreserveWhitespace(string path)
     {
         using var fs = File.OpenRead(path);
         return XDocument.Load(fs, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
     }
 
-    private static void SaveXml(XDocument doc, string path)
+    private static void SaveXmlPreserveFormatting(XDocument doc, string path)
     {
-        var settings = new XmlWriterSettings
-        {
-            Encoding = new UTF8Encoding(false),
-            Indent = true,
-            NewLineHandling = NewLineHandling.Replace,
-            OmitXmlDeclaration = true
-        };
-
-        using var writer = XmlWriter.Create(path, settings);
-        doc.Save(writer);
+        // DisableFormatting: сохраняет исходные XText (переносы/отступы), если мы их не уничтожили
+        var xml = doc.ToString(SaveOptions.DisableFormatting);
+        File.WriteAllText(path, xml, new UTF8Encoding(false));
     }
 
-    private static string ToXmlString(XDocument doc)
-    {
-        var sb = new StringBuilder();
-        var settings = new XmlWriterSettings
-        {
-            Encoding = new UTF8Encoding(false),
-            Indent = true,
-            OmitXmlDeclaration = true
-        };
-        using var xw = XmlWriter.Create(sb, settings);
-        doc.Save(xw);
-        xw.Flush();
-        return sb.ToString();
-    }
-
-    // ---------- Options + report ----------
+    // -------------------- Параметры + отчёт --------------------
 
     private sealed class Options
     {
@@ -338,19 +389,20 @@ internal static class Program
         public string? ReportPath { get; init; }
 
         public static string Usage =>
-@"Usage:
-  PropsNormalizer --root <folder> [--inplace] [--out <path>] [--report <report.md>]
+@"Использование:
+  PropsNormalizer --root <папка> [--inplace] [--out <путь>] [--report <report.md>]
 
-What it does:
-  - Reads <root>\Directory.Packages.props (required)
-  - Reads <root>\Directory.Build.props (optional; only for macro lookup)
-  - Modifies ONLY Directory.Packages.props (or writes to --out)
-  - Replaces numeric PackageVersion versions with $(Macro) if macro value exists
-  - Removes unused macros ONLY from Directory.Packages.props
-  - Sorts macro groups in Directory.Packages.props by macro name
-  - Writes Markdown report
+Что делает:
+  - Читает <папка>\Directory.Packages.props (обязательно)
+  - Читает <папка>\Directory.Build.props (если есть, только для поиска макросов)
+  - Правит ТОЛЬКО Directory.Packages.props (или пишет в --out)
+  - Макрос версии: имя оканчивается на ""Version"" и значение похоже на версию
+  - Заменяет числовые версии PackageVersion на $(Macro), если найден макрос с таким значением
+  - Удаляет неиспользуемые макросы версий ТОЛЬКО из Directory.Packages.props
+  - Сортирует макросы версий в PropertyGroup по имени, сохраняя переносы/отступы
+  - Пишет Markdown-отчёт
 
-Examples:
+Примеры:
   PropsNormalizer --root . --inplace
   PropsNormalizer --root . --out .\Directory.Packages.normalized.props --report .\normalize-report.md
 ";
@@ -380,15 +432,15 @@ Examples:
                         report = Next(i++, args, "--report");
                         break;
                     default:
-                        throw new OptionsException($"Unknown argument: {a}");
+                        throw new OptionsException($"Неизвестный аргумент: {a}");
                 }
             }
 
             if (string.IsNullOrWhiteSpace(root))
-                throw new OptionsException("Missing --root");
+                throw new OptionsException("Не задан обязательный аргумент --root");
 
             if (inplace && outPath is not null)
-                throw new OptionsException("Use either --inplace OR --out, not both.");
+                throw new OptionsException("Нужно выбрать одно: либо --inplace, либо --out (не оба сразу).");
 
             return new Options
             {
@@ -402,7 +454,7 @@ Examples:
         private static string Next(int idx, string[] args, string name)
         {
             if (idx + 1 >= args.Length)
-                throw new OptionsException($"Missing value for {name}");
+                throw new OptionsException($"Не задано значение для {name}");
             return args[idx + 1];
         }
     }
@@ -429,7 +481,6 @@ Examples:
         public List<(string Package, string Version)> PackageVersionsNonNumericLeftAsIs { get; } = new();
 
         public List<(string Package, string Version, IReadOnlyList<string> Macros, string Chosen)> AmbiguousMacroMatches { get; } = new();
-
         public List<(string Macro, string BuildValue, string PackagesValue)> MacroValueConflicts { get; } = new();
 
         public List<string> UsedMacrosAfterNormalization { get; set; } = new();
@@ -442,43 +493,45 @@ Examples:
         public string ToMarkdown(string packagesOutputPath)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("# Directory.Packages.props normalization report");
+            sb.AppendLine("# Отчёт о нормализации Directory.Packages.props");
             sb.AppendLine();
-            sb.AppendLine("## Paths");
+            sb.AppendLine("## Пути");
             sb.AppendLine();
-            sb.AppendLine($"- Root: `{Escape(RootFolder)}`");
-            sb.AppendLine($"- Input: `{Escape(PackagesInputPath)}`");
-            sb.AppendLine($"- Output: `{Escape(packagesOutputPath)}`");
-            sb.AppendLine($"- Directory.Build.props used for macro lookup: {(BuildPropsPath is null ? "_not found_" : $"`{Escape(BuildPropsPath)}`")}");
-            sb.AppendLine();
-
-            sb.AppendLine("## Macro discovery");
-            sb.AppendLine();
-            sb.AppendLine($"- Macros found in Directory.Build.props: **{MacrosFoundInBuild}**");
-            sb.AppendLine($"- Macros found in Directory.Packages.props (before): **{MacrosFoundInPackagesBefore}**");
-            sb.AppendLine($"- Total macros for matching (merged): **{MacrosMergedTotal}**");
+            sb.AppendLine($"- Папка: `{Escape(RootFolder)}`");
+            sb.AppendLine($"- Вход: `{Escape(PackagesInputPath)}`");
+            sb.AppendLine($"- Выход: `{Escape(packagesOutputPath)}`");
+            sb.AppendLine($"- Directory.Build.props (только для поиска макросов): {(BuildPropsPath is null ? "_не найден_" : $"`{Escape(BuildPropsPath)}`")}");
             sb.AppendLine();
 
-            sb.AppendLine("## Summary");
+            sb.AppendLine("## Поиск макросов версий");
             sb.AppendLine();
-            sb.AppendLine($"- Replaced numeric versions with macros: **{ReplacedNumericWithMacro.Count}**");
-            sb.AppendLine($"- PackageVersion already used macros (left as-is): **{PackageVersionAlreadyMacro}**");
-            sb.AppendLine($"- Numeric versions without matching macro (left as-is): **{PackageVersionsNoMacroLeftAsIs.Count}**");
-            sb.AppendLine($"- Non-numeric versions (left as-is): **{PackageVersionsNonNumericLeftAsIs.Count}**");
-            sb.AppendLine($"- Ambiguous matches (same value in multiple macros): **{AmbiguousMacroMatches.Count}**");
+            sb.AppendLine($"- Найдено в Directory.Build.props: **{MacrosFoundInBuild}**");
+            sb.AppendLine($"- Найдено в Directory.Packages.props (до правок): **{MacrosFoundInPackagesBefore}**");
+            sb.AppendLine($"- Всего использовано для сопоставления (объединение): **{MacrosMergedTotal}**");
             sb.AppendLine();
-            sb.AppendLine($"- Removed unused macros from Directory.Packages.props: **{RemovedUnusedMacrosFromPackages.Count}**");
-            sb.AppendLine($"- Removed empty PropertyGroup(s): **{RemovedEmptyPropertyGroups}**");
-            sb.AppendLine($"- Sorted macro group(s): **{SortedMacroGroupsCount}**");
+            sb.AppendLine("> Макрос версии — это элемент в `<PropertyGroup>`, имя которого оканчивается на `Version`, а значение похоже на версию (например `1.2.3` или `1.2.3-alpha`).");
+            sb.AppendLine();
+
+            sb.AppendLine("## Итоги");
+            sb.AppendLine();
+            sb.AppendLine($"- Заменено числовых версий на макросы: **{ReplacedNumericWithMacro.Count}**");
+            sb.AppendLine($"- Уже были макросы в PackageVersion (оставлено как есть): **{PackageVersionAlreadyMacro}**");
+            sb.AppendLine($"- Числовые версии без подходящего макроса (оставлено как есть): **{PackageVersionsNoMacroLeftAsIs.Count}**");
+            sb.AppendLine($"- Нечисловые версии (оставлено как есть): **{PackageVersionsNonNumericLeftAsIs.Count}**");
+            sb.AppendLine($"- Неоднозначных совпадений: **{AmbiguousMacroMatches.Count}**");
+            sb.AppendLine();
+            sb.AppendLine($"- Удалено неиспользуемых макросов из Directory.Packages.props: **{RemovedUnusedMacrosFromPackages.Count}**");
+            sb.AppendLine($"- Удалено пустых PropertyGroup: **{RemovedEmptyPropertyGroups}**");
+            sb.AppendLine($"- Отсортировано групп макросов: **{SortedMacroGroupsCount}**");
             sb.AppendLine();
 
             if (MacroValueConflicts.Count > 0)
             {
-                sb.AppendLine("## Macro value conflicts (Build vs Packages)");
+                sb.AppendLine("## Конфликты значений макросов (Build vs Packages)");
                 sb.AppendLine();
-                sb.AppendLine("Same macro name had different values; matching prefers the value from Directory.Packages.props.");
+                sb.AppendLine("Один и тот же макрос имел разные значения. Для сопоставления предпочтение отдавалось значению из Directory.Packages.props.");
                 sb.AppendLine();
-                sb.AppendLine("| Macro | Build value | Packages value |");
+                sb.AppendLine("| Макрос | Значение в Build | Значение в Packages |");
                 sb.AppendLine("|---|---:|---:|");
                 foreach (var c in MacroValueConflicts.OrderBy(x => x.Macro, StringComparer.OrdinalIgnoreCase))
                     sb.AppendLine($"| `{Escape(c.Macro)}` | `{Escape(c.BuildValue)}` | `{Escape(c.PackagesValue)}` |");
@@ -487,9 +540,9 @@ Examples:
 
             if (ReplacedNumericWithMacro.Count > 0)
             {
-                sb.AppendLine("## Replacements (numeric -> macro)");
+                sb.AppendLine("## Замены (числовая версия → макрос)");
                 sb.AppendLine();
-                sb.AppendLine("| Package | Old version | New |");
+                sb.AppendLine("| Пакет | Было | Стало |");
                 sb.AppendLine("|---|---:|---|");
                 foreach (var r in ReplacedNumericWithMacro.OrderBy(x => x.Package, StringComparer.OrdinalIgnoreCase))
                     sb.AppendLine($"| `{Escape(r.Package)}` | `{Escape(r.OldVersion)}` | `$({Escape(r.Macro)})` |");
@@ -498,22 +551,22 @@ Examples:
 
             if (AmbiguousMacroMatches.Count > 0)
             {
-                sb.AppendLine("## Ambiguous matches");
+                sb.AppendLine("## Неоднозначные совпадения");
                 sb.AppendLine();
-                sb.AppendLine("Same numeric version matched multiple macros; first macro (alphabetical) was chosen.");
+                sb.AppendLine("Одинаковое значение версии найдено в нескольких макросах; выбран первый по алфавиту.");
                 sb.AppendLine();
                 foreach (var a in AmbiguousMacroMatches)
                 {
-                    sb.AppendLine($"- `{Escape(a.Package)}` version `{Escape(a.Version)}` matched: {string.Join(", ", a.Macros.Select(m => $"`{Escape(m)}`"))}. Chosen: `{Escape(a.Chosen)}`");
+                    sb.AppendLine($"- `{Escape(a.Package)}` версия `{Escape(a.Version)}` совпала с: {string.Join(", ", a.Macros.Select(m => $"`{Escape(m)}`"))}. Выбран: `{Escape(a.Chosen)}`");
                 }
                 sb.AppendLine();
             }
 
             if (RemovedUnusedMacrosFromPackages.Count > 0)
             {
-                sb.AppendLine("## Removed unused macros (only from Directory.Packages.props)");
+                sb.AppendLine("## Удалённые неиспользуемые макросы (только из Directory.Packages.props)");
                 sb.AppendLine();
-                sb.AppendLine("| Macro | Value |");
+                sb.AppendLine("| Макрос | Значение |");
                 sb.AppendLine("|---|---:|");
                 foreach (var rm in RemovedUnusedMacrosFromPackages.OrderBy(x => x.Macro, StringComparer.OrdinalIgnoreCase))
                     sb.AppendLine($"| `{Escape(rm.Macro)}` | `{Escape(rm.Value)}` |");
@@ -522,7 +575,7 @@ Examples:
 
             if (UsedMacrosAfterNormalization.Count > 0)
             {
-                sb.AppendLine("## Used macros after normalization");
+                sb.AppendLine("## Используемые макросы после нормализации");
                 sb.AppendLine();
                 sb.AppendLine(string.Join(", ", UsedMacrosAfterNormalization.Select(x => $"`{Escape(x)}`")));
                 sb.AppendLine();
@@ -530,9 +583,9 @@ Examples:
 
             if (PackageVersionsNoMacroLeftAsIs.Count > 0)
             {
-                sb.AppendLine("## Left as-is (no matching macro)");
+                sb.AppendLine("## Оставлено как есть (нет подходящего макроса)");
                 sb.AppendLine();
-                sb.AppendLine("| Package | Version |");
+                sb.AppendLine("| Пакет | Версия |");
                 sb.AppendLine("|---|---:|");
                 foreach (var p in PackageVersionsNoMacroLeftAsIs.OrderBy(x => x.Package, StringComparer.OrdinalIgnoreCase))
                     sb.AppendLine($"| `{Escape(p.Package)}` | `{Escape(p.Version)}` |");
@@ -541,9 +594,9 @@ Examples:
 
             if (PackageVersionsNonNumericLeftAsIs.Count > 0)
             {
-                sb.AppendLine("## Left as-is (non-numeric version)");
+                sb.AppendLine("## Оставлено как есть (версия не похожа на числовую)");
                 sb.AppendLine();
-                sb.AppendLine("| Package | Version |");
+                sb.AppendLine("| Пакет | Версия |");
                 sb.AppendLine("|---|---:|");
                 foreach (var p in PackageVersionsNonNumericLeftAsIs.OrderBy(x => x.Package, StringComparer.OrdinalIgnoreCase))
                     sb.AppendLine($"| `{Escape(p.Package)}` | `{Escape(p.Version)}` |");
