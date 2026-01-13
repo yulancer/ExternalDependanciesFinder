@@ -5,10 +5,13 @@ using System.Xml.Linq;
 
 internal static class Program
 {
+    // $(MacroName)
     private static readonly Regex MacroUseRegex = new(@"\$\(([^)]+)\)", RegexOptions.Compiled);
-    private static readonly Regex LooksLikeVersionRegex = new(
-        @"^\d+(\.\d+){1,3}([\-+][0-9A-Za-z\.\-_]+)?$",
-        RegexOptions.Compiled);
+
+    // 1.2.3 / 1.2.3.4 / 1.2.3-alpha.1 / 1.2.3+build
+    private static readonly Regex LooksLikeVersionRegex =
+        new(@"^\d+(\.\d+){1,3}([\-+][0-9A-Za-z\.\-_]+)?$",
+            RegexOptions.Compiled);
 
     public static int Main(string[] args)
     {
@@ -16,80 +19,92 @@ internal static class Program
         {
             var opt = Options.Parse(args);
 
-            if (!File.Exists(opt.PackagesPropsPath))
+            var root = Path.GetFullPath(opt.RootFolder);
+            if (!Directory.Exists(root))
             {
-                Console.Error.WriteLine($"[ERR] Directory.Packages.props not found: {opt.PackagesPropsPath}");
-                return 2;
-            }
-            if (!File.Exists(opt.BuildPropsPath))
-            {
-                Console.Error.WriteLine($"[ERR] Directory.Build.props not found: {opt.BuildPropsPath}");
+                Console.Error.WriteLine($"[ERR] Folder not found: {root}");
                 return 2;
             }
 
-            var report = new Report();
+            var packagesPath = Path.Combine(root, "Directory.Packages.props");
+            var buildPath = Path.Combine(root, "Directory.Build.props");
 
-            var packagesDoc = LoadXml(opt.PackagesPropsPath);
-            var buildDoc = LoadXml(opt.BuildPropsPath);
-
-            // 1) Find "version macro" property groups in Directory.Build.props (after <!-- Version settings -->)
-            var versionGroups = FindVersionSettingsPropertyGroups(buildDoc).ToList();
-
-            // Collect macro definitions from those groups: MacroName -> Value
-            var macroValueByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var pg in versionGroups)
+            if (!File.Exists(packagesPath))
             {
-                foreach (var el in pg.Elements())
-                {
-                    var name = el.Name.LocalName;
-                    var value = (el.Value ?? string.Empty).Trim();
-
-                    if (string.IsNullOrWhiteSpace(name)) continue;
-                    if (string.IsNullOrWhiteSpace(value)) continue;
-
-                    // we only treat these as version macros if value "looks like a version"
-                    if (!LooksLikeVersionRegex.IsMatch(value)) continue;
-
-                    macroValueByName[name] = value;
-                }
+                Console.Error.WriteLine($"[ERR] Directory.Packages.props not found in: {root}");
+                return 2;
             }
 
-            // Build reverse index: version value -> macro names
-            var macrosByValue = macroValueByName
+            var report = new Report
+            {
+                RootFolder = root,
+                PackagesInputPath = packagesPath,
+                BuildPropsPath = File.Exists(buildPath) ? buildPath : null
+            };
+
+            // Load XML
+            var packagesDoc = LoadXml(packagesPath);
+            XDocument? buildDoc = File.Exists(buildPath) ? LoadXml(buildPath) : null;
+
+            // Collect macros from BOTH files (Build + Packages)
+            var macrosFromBuild = buildDoc is null ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                                                   : CollectVersionMacros(buildDoc);
+
+            var macrosFromPackagesBefore = CollectVersionMacros(packagesDoc);
+
+            // Merge: if same macro exists in both, prefer Packages (because it’s local to file we edit)
+            // (Also handy: if values differ, we track it.)
+            var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in macrosFromBuild) merged[kv.Key] = kv.Value;
+            foreach (var kv in macrosFromPackagesBefore)
+            {
+                if (merged.TryGetValue(kv.Key, out var prev) && !StringComparer.OrdinalIgnoreCase.Equals(prev, kv.Value))
+                    report.MacroValueConflicts.Add((kv.Key, prev, kv.Value));
+
+                merged[kv.Key] = kv.Value;
+            }
+
+            report.MacrosFoundInBuild = macrosFromBuild.Count;
+            report.MacrosFoundInPackagesBefore = macrosFromPackagesBefore.Count;
+            report.MacrosMergedTotal = merged.Count;
+
+            // Reverse index: versionValue -> [macroNames...]
+            var macrosByValue = merged
                 .GroupBy(kv => kv.Value, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
                     g => g.Key,
                     g => g.Select(x => x.Key).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
                     StringComparer.OrdinalIgnoreCase);
 
-            // 2) Normalize Directory.Packages.props: replace numeric versions with $(Macro) when possible
-            NormalizePackagesProps(packagesDoc, macrosByValue, report);
+            // 1) Replace numeric PackageVersion @Version -> $(Macro) if exists
+            NormalizePackageVersions(packagesDoc, macrosByValue, report);
 
-            // 3) Determine used macros AFTER normalization (scan full XML text)
-            var packagesXmlAfter = ToXmlString(packagesDoc);
+            // 2) Determine used macros after normalization (scan resulting XML string)
+            var packagesXmlAfterReplace = ToXmlString(packagesDoc);
             var usedMacros = new HashSet<string>(
-                MacroUseRegex.Matches(packagesXmlAfter).Select(m => m.Groups[1].Value),
+                MacroUseRegex.Matches(packagesXmlAfterReplace).Select(m => m.Groups[1].Value),
                 StringComparer.OrdinalIgnoreCase);
 
             report.UsedMacrosAfterNormalization = usedMacros.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
 
-            // 4) Remove unused macros from version settings groups in Directory.Build.props + sort remaining macros
-            NormalizeBuildProps(buildDoc, versionGroups, usedMacros, report);
+            // 3) Remove unused macros ONLY from Directory.Packages.props (since only it is editable)
+            RemoveUnusedMacrosFromPackages(packagesDoc, usedMacros, report);
 
-            // 5) Write outputs
-            var packagesOutPath = opt.InPlace ? opt.PackagesPropsPath : opt.PackagesOutputPath;
-            var buildOutPath = opt.InPlace ? opt.BuildPropsPath : opt.BuildOutputPath;
+            // 4) Sort macro sections (PropertyGroup with version-macro elements) by macro name
+            SortMacroGroupsInPackages(packagesDoc, report);
+
+            // Output paths
+            var packagesOutPath = opt.InPlace
+                ? packagesPath
+                : Path.GetFullPath(opt.OutputPath ?? Path.Combine(root, "Directory.Packages.normalized.props"));
+
+            var reportPath = Path.GetFullPath(opt.ReportPath ?? Path.Combine(root, "normalize-report.md"));
 
             SaveXml(packagesDoc, packagesOutPath);
-            SaveXml(buildDoc, buildOutPath);
+            File.WriteAllText(reportPath, report.ToMarkdown(packagesOutPath), new UTF8Encoding(false));
 
-            // 6) Write report.md
-            var reportPath = opt.ReportPath;
-            File.WriteAllText(reportPath, report.ToMarkdown(opt.PackagesPropsPath, packagesOutPath, opt.BuildPropsPath, buildOutPath), new UTF8Encoding(false));
-
-            Console.WriteLine("[OK] Done.");
+            Console.WriteLine("[OK] Done");
             Console.WriteLine($"     Packages: {packagesOutPath}");
-            Console.WriteLine($"     Build   : {buildOutPath}");
             Console.WriteLine($"     Report  : {reportPath}");
             return 0;
         }
@@ -107,7 +122,9 @@ internal static class Program
         }
     }
 
-    private static void NormalizePackagesProps(
+    // ---------- Core logic ----------
+
+    private static void NormalizePackageVersions(
         XDocument packagesDoc,
         Dictionary<string, List<string>> macrosByValue,
         Report report)
@@ -121,176 +138,160 @@ internal static class Program
         {
             var include = pv.Attribute("Include")?.Value?.Trim() ?? "";
             var verAttr = pv.Attribute("Version");
-            if (verAttr == null) continue;
+            if (verAttr is null) continue;
 
             var current = (verAttr.Value ?? "").Trim();
             if (string.IsNullOrWhiteSpace(current)) continue;
 
-            // already macro
             if (current.Contains("$("))
             {
-                report.AlreadyMacroCount++;
+                report.PackageVersionAlreadyMacro++;
                 continue;
             }
 
-            // only replace "numeric-looking" versions
             if (!LooksLikeVersionRegex.IsMatch(current))
             {
-                report.NonNumericVersionLeftAsIs.Add(new Report.PackageLine(include, current));
+                report.PackageVersionsNonNumericLeftAsIs.Add((include, current));
                 continue;
             }
 
             if (!macrosByValue.TryGetValue(current, out var macroNames) || macroNames.Count == 0)
             {
-                report.NoMatchingMacroLeftAsIs.Add(new Report.PackageLine(include, current));
+                report.PackageVersionsNoMacroLeftAsIs.Add((include, current));
                 continue;
             }
 
-            // if multiple macros share same value - pick first alphabetical, record ambiguity
             var chosen = macroNames[0];
             if (macroNames.Count > 1)
-            {
-                report.AmbiguousMacroMatches.Add(new Report.Ambiguity(include, current, macroNames, chosen));
-            }
+                report.AmbiguousMacroMatches.Add((include, current, macroNames, chosen));
 
             verAttr.Value = $"$({chosen})";
-            report.ReplacedNumericWithMacro.Add(new Report.Replacement(include, current, chosen));
+            report.ReplacedNumericWithMacro.Add((include, current, chosen));
         }
     }
 
-    private static void NormalizeBuildProps(
-        XDocument buildDoc,
-        List<XElement> versionGroups,
+    private static void RemoveUnusedMacrosFromPackages(
+        XDocument packagesDoc,
         HashSet<string> usedMacros,
         Report report)
     {
-        foreach (var pg in versionGroups)
-        {
-            // collect candidate macro properties inside this PG
-            var props = pg.Elements().ToList();
+        // We treat "macro definitions" as: PropertyGroup child elements without attributes
+        // whose value looks like a version.
+        var propertyGroups = packagesDoc.Descendants().Where(x => x.Name.LocalName == "PropertyGroup").ToList();
 
-            // remove unused version macros (only those that look like versions)
-            foreach (var el in props)
+        foreach (var pg in propertyGroups)
+        {
+            var versionMacroElements = pg.Elements()
+                .Where(e => !e.HasAttributes && LooksLikeVersionRegex.IsMatch((e.Value ?? "").Trim()))
+                .ToList();
+
+            foreach (var el in versionMacroElements)
             {
                 var name = el.Name.LocalName;
-                var value = (el.Value ?? string.Empty).Trim();
-
-                if (!LooksLikeVersionRegex.IsMatch(value))
-                    continue; // don't touch non-version properties inside the group
+                var value = (el.Value ?? "").Trim();
 
                 if (!usedMacros.Contains(name))
                 {
                     el.Remove();
-                    report.RemovedUnusedMacros.Add(new Report.RemovedMacro(name, value));
+                    report.RemovedUnusedMacrosFromPackages.Add((name, value));
                 }
             }
 
-            // sort remaining version-macro elements by name (stable, keeps non-version elements in place)
-            // Strategy:
-            // - extract version-looking elements
-            // - sort them
-            // - replace them in the PG keeping non-version elements (and comments) untouched
-            var nodes = pg.Nodes().ToList();
+            // If PropertyGroup became empty (no element children), remove it to avoid empty blocks
+            if (!pg.Elements().Any())
+            {
+                // keep PropertyGroup if it still has non-element nodes? Usually not needed.
+                // If there are no elements at all, it’s empty for practical purposes.
+                pg.Remove();
+                report.RemovedEmptyPropertyGroups++;
+            }
+        }
+    }
 
-            var versionElements = nodes
-                .OfType<XElement>()
-                .Where(e => LooksLikeVersionRegex.IsMatch((e.Value ?? "").Trim()))
+    private static void SortMacroGroupsInPackages(XDocument packagesDoc, Report report)
+    {
+        var groups = packagesDoc.Descendants().Where(x => x.Name.LocalName == "PropertyGroup").ToList();
+
+        foreach (var pg in groups)
+        {
+            // macro group = has at least one version-macro element
+            var macroEls = pg.Elements()
+                .Where(e => !e.HasAttributes && LooksLikeVersionRegex.IsMatch((e.Value ?? "").Trim()))
                 .ToList();
 
-            var sorted = versionElements
-                .OrderBy(e => e.Name.LocalName, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            // if order changed — rewrite only those version elements in the group
-            bool changedOrder = !versionElements.Select(e => e.Name.LocalName)
-                .SequenceEqual(sorted.Select(e => e.Name.LocalName), StringComparer.OrdinalIgnoreCase);
-
-            if (!changedOrder)
+            if (macroEls.Count == 0)
                 continue;
 
-            // Remove the old version elements
-            foreach (var ve in versionElements)
-                ve.Remove();
+            // If group has any non-macro elements, we do a conservative sort:
+            // sort only those macro elements, leave others as-is.
+            var otherEls = pg.Elements().Except(macroEls).ToList();
 
-            // Insert sorted version elements at the position of the first removed version element.
-            // Find insertion index among child nodes.
-            int firstIndex = IndexOfFirstVersionElement(nodes);
-            if (firstIndex < 0)
+            bool hasOnlyMacros = otherEls.Count == 0;
+
+            var sortedMacros = macroEls
+                .OrderBy(e => e.Name.LocalName, StringComparer.OrdinalIgnoreCase)
+                .Select(e => new XElement(e.Name, (e.Value ?? "").Trim()))
+                .ToList();
+
+            if (hasOnlyMacros)
             {
-                // if somehow no index - append
-                foreach (var e in sorted) pg.Add(e);
+                var before = macroEls.Select(e => e.Name.LocalName).ToList();
+                var after = sortedMacros.Select(e => e.Name.LocalName).ToList();
+                if (!before.SequenceEqual(after, StringComparer.OrdinalIgnoreCase))
+                    report.SortedMacroGroupsCount++;
+
+                pg.RemoveNodes();
+                foreach (var e in sortedMacros) pg.Add(e);
             }
             else
             {
-                // rebuild nodes around insertion
-                var before = pg.Nodes().Take(firstIndex).ToList();
-                var after = pg.Nodes().Skip(firstIndex).ToList(); // after removals, this starts from original "firstIndex" position
+                // Replace each original macro element in place using sorted order,
+                // keeping non-macro elements in the same relative positions.
+                var originalMacroNodes = pg.Elements()
+                    .Select((el, idx) => (el, idx))
+                    .Where(t => macroEls.Contains(t.el))
+                    .ToList();
 
-                pg.RemoveNodes();
-                foreach (var n in before) pg.Add(n);
-                foreach (var e in sorted) pg.Add(e);
-                foreach (var n in after) pg.Add(n);
-            }
+                var before = originalMacroNodes.Select(x => x.el.Name.LocalName).ToList();
+                var after = sortedMacros.Select(x => x.Name.LocalName).ToList();
 
-            report.SortedMacroGroupsCount++;
-        }
-    }
+                if (!before.SequenceEqual(after, StringComparer.OrdinalIgnoreCase))
+                    report.SortedMacroGroupsCount++;
 
-    private static int IndexOfFirstVersionElement(List<XNode> nodes)
-    {
-        for (int i = 0; i < nodes.Count; i++)
-        {
-            if (nodes[i] is XElement el)
-            {
-                var value = (el.Value ?? string.Empty).Trim();
-                if (LooksLikeVersionRegex.IsMatch(value))
-                    return i;
-            }
-        }
-        return -1;
-    }
-
-    private static IEnumerable<XElement> FindVersionSettingsPropertyGroups(XDocument buildDoc)
-    {
-        // We detect comment nodes containing "Version settings" and pick the next PropertyGroup element after them.
-        var allNodes = buildDoc
-            .Root?
-            .Nodes()
-            .ToList() ?? new List<XNode>();
-
-        for (int i = 0; i < allNodes.Count; i++)
-        {
-            if (allNodes[i] is XComment c)
-            {
-                var text = (c.Value ?? "").Trim();
-                if (text.Contains("Version settings", StringComparison.OrdinalIgnoreCase))
+                for (int i = 0; i < originalMacroNodes.Count; i++)
                 {
-                    // find next element PropertyGroup
-                    for (int j = i + 1; j < allNodes.Count; j++)
-                    {
-                        if (allNodes[j] is XElement el && el.Name.LocalName == "PropertyGroup")
-                        {
-                            yield return el;
-                            break;
-                        }
-                    }
+                    var (el, _) = originalMacroNodes[i];
+                    el.ReplaceWith(sortedMacros[i]);
                 }
             }
         }
+    }
 
-        // Fallback: if there is no comment marker, try to find any PropertyGroup that contains version-looking properties
-        // and names that are later used as $(...) macros in Directory.Packages.props.
-        // (We keep fallback conservative: require at least 3 version-like children)
-        if (!buildDoc.DescendantNodes().OfType<XComment>().Any(x => (x.Value ?? "").Contains("Version settings", StringComparison.OrdinalIgnoreCase)))
+    // Collect macros in a doc: name->value, where element in PropertyGroup, no attributes, value looks like version
+    private static Dictionary<string, string> CollectVersionMacros(XDocument doc)
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pg in doc.Descendants().Where(x => x.Name.LocalName == "PropertyGroup"))
         {
-            foreach (var pg in buildDoc.Descendants().Where(x => x.Name.LocalName == "PropertyGroup"))
+            foreach (var el in pg.Elements())
             {
-                var count = pg.Elements().Count(e => LooksLikeVersionRegex.IsMatch((e.Value ?? "").Trim()));
-                if (count >= 3)
-                    yield return pg;
+                if (el.HasAttributes) continue;
+
+                var name = el.Name.LocalName;
+                var value = (el.Value ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(value)) continue;
+
+                if (!LooksLikeVersionRegex.IsMatch(value)) continue;
+
+                dict[name] = value;
             }
         }
+
+        return dict;
     }
+
+    // ---------- XML helpers ----------
 
     private static XDocument LoadXml(string path)
     {
@@ -327,32 +328,38 @@ internal static class Program
         return sb.ToString();
     }
 
+    // ---------- Options + report ----------
+
     private sealed class Options
     {
-        public string PackagesPropsPath { get; init; } = "";
-        public string BuildPropsPath { get; init; } = "";
+        public string RootFolder { get; init; } = "";
         public bool InPlace { get; init; }
-        public string PackagesOutputPath { get; init; } = "";
-        public string BuildOutputPath { get; init; } = "";
-        public string ReportPath { get; init; } = "";
+        public string? OutputPath { get; init; }
+        public string? ReportPath { get; init; }
 
         public static string Usage =>
 @"Usage:
-  PropsNormalizer --packages <Directory.Packages.props> --build <Directory.Build.props> [--inplace]
-                  [--out-packages <path>] [--out-build <path>] [--report <report.md>]
+  PropsNormalizer --root <folder> [--inplace] [--out <path>] [--report <report.md>]
+
+What it does:
+  - Reads <root>\Directory.Packages.props (required)
+  - Reads <root>\Directory.Build.props (optional; only for macro lookup)
+  - Modifies ONLY Directory.Packages.props (or writes to --out)
+  - Replaces numeric PackageVersion versions with $(Macro) if macro value exists
+  - Removes unused macros ONLY from Directory.Packages.props
+  - Sorts macro groups in Directory.Packages.props by macro name
+  - Writes Markdown report
 
 Examples:
-  PropsNormalizer --packages .\Directory.Packages.props --build .\Directory.Build.props --inplace
-  PropsNormalizer --packages .\Directory.Packages.props --build .\Directory.Build.props --out-packages .\Directory.Packages.normalized.props --out-build .\Directory.Build.normalized.props --report .\normalize-report.md
+  PropsNormalizer --root . --inplace
+  PropsNormalizer --root . --out .\Directory.Packages.normalized.props --report .\normalize-report.md
 ";
 
         public static Options Parse(string[] args)
         {
-            string? packages = null;
-            string? build = null;
+            string? root = null;
             bool inplace = false;
-            string? outPackages = null;
-            string? outBuild = null;
+            string? outPath = null;
             string? report = null;
 
             for (int i = 0; i < args.Length; i++)
@@ -360,20 +367,14 @@ Examples:
                 var a = args[i].Trim();
                 switch (a)
                 {
-                    case "--packages":
-                        packages = Next(i++, args, "--packages");
-                        break;
-                    case "--build":
-                        build = Next(i++, args, "--build");
+                    case "--root":
+                        root = Next(i++, args, "--root");
                         break;
                     case "--inplace":
                         inplace = true;
                         break;
-                    case "--out-packages":
-                        outPackages = Next(i++, args, "--out-packages");
-                        break;
-                    case "--out-build":
-                        outBuild = Next(i++, args, "--out-build");
+                    case "--out":
+                        outPath = Next(i++, args, "--out");
                         break;
                     case "--report":
                         report = Next(i++, args, "--report");
@@ -383,35 +384,18 @@ Examples:
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(packages))
-                throw new OptionsException("Missing --packages");
-            if (string.IsNullOrWhiteSpace(build))
-                throw new OptionsException("Missing --build");
+            if (string.IsNullOrWhiteSpace(root))
+                throw new OptionsException("Missing --root");
 
-            var packagesFull = Path.GetFullPath(packages);
-            var buildFull = Path.GetFullPath(build);
-
-            if (inplace)
-            {
-                outPackages = packagesFull;
-                outBuild = buildFull;
-            }
-            else
-            {
-                outPackages ??= Path.Combine(Path.GetDirectoryName(packagesFull)!, "Directory.Packages.normalized.props");
-                outBuild ??= Path.Combine(Path.GetDirectoryName(buildFull)!, "Directory.Build.normalized.props");
-            }
-
-            report ??= Path.Combine(Path.GetDirectoryName(packagesFull)!, "normalize-report.md");
+            if (inplace && outPath is not null)
+                throw new OptionsException("Use either --inplace OR --out, not both.");
 
             return new Options
             {
-                PackagesPropsPath = packagesFull,
-                BuildPropsPath = buildFull,
+                RootFolder = root!,
                 InPlace = inplace,
-                PackagesOutputPath = Path.GetFullPath(outPackages),
-                BuildOutputPath = Path.GetFullPath(outBuild),
-                ReportPath = Path.GetFullPath(report)
+                OutputPath = outPath,
+                ReportPath = report
             };
         }
 
@@ -430,48 +414,82 @@ Examples:
 
     private sealed class Report
     {
-        public int AlreadyMacroCount { get; set; }
+        public string RootFolder { get; set; } = "";
+        public string PackagesInputPath { get; set; } = "";
+        public string? BuildPropsPath { get; set; }
 
-        public List<Replacement> ReplacedNumericWithMacro { get; } = new();
-        public List<PackageLine> NoMatchingMacroLeftAsIs { get; } = new();
-        public List<PackageLine> NonNumericVersionLeftAsIs { get; } = new();
-        public List<Ambiguity> AmbiguousMacroMatches { get; } = new();
+        public int MacrosFoundInBuild { get; set; }
+        public int MacrosFoundInPackagesBefore { get; set; }
+        public int MacrosMergedTotal { get; set; }
 
-        public List<RemovedMacro> RemovedUnusedMacros { get; } = new();
-        public int SortedMacroGroupsCount { get; set; }
+        public int PackageVersionAlreadyMacro { get; set; }
+
+        public List<(string Package, string OldVersion, string Macro)> ReplacedNumericWithMacro { get; } = new();
+        public List<(string Package, string Version)> PackageVersionsNoMacroLeftAsIs { get; } = new();
+        public List<(string Package, string Version)> PackageVersionsNonNumericLeftAsIs { get; } = new();
+
+        public List<(string Package, string Version, IReadOnlyList<string> Macros, string Chosen)> AmbiguousMacroMatches { get; } = new();
+
+        public List<(string Macro, string BuildValue, string PackagesValue)> MacroValueConflicts { get; } = new();
 
         public List<string> UsedMacrosAfterNormalization { get; set; } = new();
 
-        public string ToMarkdown(string packagesIn, string packagesOut, string buildIn, string buildOut)
+        public List<(string Macro, string Value)> RemovedUnusedMacrosFromPackages { get; } = new();
+        public int RemovedEmptyPropertyGroups { get; set; }
+
+        public int SortedMacroGroupsCount { get; set; }
+
+        public string ToMarkdown(string packagesOutputPath)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("# Props normalization report");
+            sb.AppendLine("# Directory.Packages.props normalization report");
             sb.AppendLine();
-            sb.AppendLine("## Files");
+            sb.AppendLine("## Paths");
             sb.AppendLine();
-            sb.AppendLine($"- Packages input: `{packagesIn}`");
-            sb.AppendLine($"- Packages output: `{packagesOut}`");
-            sb.AppendLine($"- Build input: `{buildIn}`");
-            sb.AppendLine($"- Build output: `{buildOut}`");
+            sb.AppendLine($"- Root: `{Escape(RootFolder)}`");
+            sb.AppendLine($"- Input: `{Escape(PackagesInputPath)}`");
+            sb.AppendLine($"- Output: `{Escape(packagesOutputPath)}`");
+            sb.AppendLine($"- Directory.Build.props used for macro lookup: {(BuildPropsPath is null ? "_not found_" : $"`{Escape(BuildPropsPath)}`")}");
+            sb.AppendLine();
+
+            sb.AppendLine("## Macro discovery");
+            sb.AppendLine();
+            sb.AppendLine($"- Macros found in Directory.Build.props: **{MacrosFoundInBuild}**");
+            sb.AppendLine($"- Macros found in Directory.Packages.props (before): **{MacrosFoundInPackagesBefore}**");
+            sb.AppendLine($"- Total macros for matching (merged): **{MacrosMergedTotal}**");
             sb.AppendLine();
 
             sb.AppendLine("## Summary");
             sb.AppendLine();
             sb.AppendLine($"- Replaced numeric versions with macros: **{ReplacedNumericWithMacro.Count}**");
-            sb.AppendLine($"- PackageVersion already used macros (left as-is): **{AlreadyMacroCount}**");
-            sb.AppendLine($"- Numeric versions without matching macro (left as-is): **{NoMatchingMacroLeftAsIs.Count}**");
-            sb.AppendLine($"- Non-numeric versions (left as-is): **{NonNumericVersionLeftAsIs.Count}**");
-            sb.AppendLine($"- Ambiguous macro matches (same value in multiple macros): **{AmbiguousMacroMatches.Count}**");
+            sb.AppendLine($"- PackageVersion already used macros (left as-is): **{PackageVersionAlreadyMacro}**");
+            sb.AppendLine($"- Numeric versions without matching macro (left as-is): **{PackageVersionsNoMacroLeftAsIs.Count}**");
+            sb.AppendLine($"- Non-numeric versions (left as-is): **{PackageVersionsNonNumericLeftAsIs.Count}**");
+            sb.AppendLine($"- Ambiguous matches (same value in multiple macros): **{AmbiguousMacroMatches.Count}**");
             sb.AppendLine();
-            sb.AppendLine($"- Removed unused macros in build props: **{RemovedUnusedMacros.Count}**");
-            sb.AppendLine($"- Sorted version-macro groups: **{SortedMacroGroupsCount}**");
+            sb.AppendLine($"- Removed unused macros from Directory.Packages.props: **{RemovedUnusedMacrosFromPackages.Count}**");
+            sb.AppendLine($"- Removed empty PropertyGroup(s): **{RemovedEmptyPropertyGroups}**");
+            sb.AppendLine($"- Sorted macro group(s): **{SortedMacroGroupsCount}**");
             sb.AppendLine();
+
+            if (MacroValueConflicts.Count > 0)
+            {
+                sb.AppendLine("## Macro value conflicts (Build vs Packages)");
+                sb.AppendLine();
+                sb.AppendLine("Same macro name had different values; matching prefers the value from Directory.Packages.props.");
+                sb.AppendLine();
+                sb.AppendLine("| Macro | Build value | Packages value |");
+                sb.AppendLine("|---|---:|---:|");
+                foreach (var c in MacroValueConflicts.OrderBy(x => x.Macro, StringComparer.OrdinalIgnoreCase))
+                    sb.AppendLine($"| `{Escape(c.Macro)}` | `{Escape(c.BuildValue)}` | `{Escape(c.PackagesValue)}` |");
+                sb.AppendLine();
+            }
 
             if (ReplacedNumericWithMacro.Count > 0)
             {
                 sb.AppendLine("## Replacements (numeric -> macro)");
                 sb.AppendLine();
-                sb.AppendLine("| Package | Old version | Macro |");
+                sb.AppendLine("| Package | Old version | New |");
                 sb.AppendLine("|---|---:|---|");
                 foreach (var r in ReplacedNumericWithMacro.OrderBy(x => x.Package, StringComparer.OrdinalIgnoreCase))
                     sb.AppendLine($"| `{Escape(r.Package)}` | `{Escape(r.OldVersion)}` | `$({Escape(r.Macro)})` |");
@@ -482,7 +500,7 @@ Examples:
             {
                 sb.AppendLine("## Ambiguous matches");
                 sb.AppendLine();
-                sb.AppendLine("Same numeric version value found in multiple macros; the first macro (alphabetical) was chosen.");
+                sb.AppendLine("Same numeric version matched multiple macros; first macro (alphabetical) was chosen.");
                 sb.AppendLine();
                 foreach (var a in AmbiguousMacroMatches)
                 {
@@ -491,24 +509,13 @@ Examples:
                 sb.AppendLine();
             }
 
-            if (NoMatchingMacroLeftAsIs.Count > 0)
+            if (RemovedUnusedMacrosFromPackages.Count > 0)
             {
-                sb.AppendLine("## Left as-is (no matching macro)");
-                sb.AppendLine();
-                sb.AppendLine("| Package | Version |");
-                sb.AppendLine("|---|---:|");
-                foreach (var p in NoMatchingMacroLeftAsIs.OrderBy(x => x.Package, StringComparer.OrdinalIgnoreCase))
-                    sb.AppendLine($"| `{Escape(p.Package)}` | `{Escape(p.Version)}` |");
-                sb.AppendLine();
-            }
-
-            if (RemovedUnusedMacros.Count > 0)
-            {
-                sb.AppendLine("## Removed unused macros (Directory.Build.props)");
+                sb.AppendLine("## Removed unused macros (only from Directory.Packages.props)");
                 sb.AppendLine();
                 sb.AppendLine("| Macro | Value |");
                 sb.AppendLine("|---|---:|");
-                foreach (var rm in RemovedUnusedMacros.OrderBy(x => x.Macro, StringComparer.OrdinalIgnoreCase))
+                foreach (var rm in RemovedUnusedMacrosFromPackages.OrderBy(x => x.Macro, StringComparer.OrdinalIgnoreCase))
                     sb.AppendLine($"| `{Escape(rm.Macro)}` | `{Escape(rm.Value)}` |");
                 sb.AppendLine();
             }
@@ -521,14 +528,31 @@ Examples:
                 sb.AppendLine();
             }
 
+            if (PackageVersionsNoMacroLeftAsIs.Count > 0)
+            {
+                sb.AppendLine("## Left as-is (no matching macro)");
+                sb.AppendLine();
+                sb.AppendLine("| Package | Version |");
+                sb.AppendLine("|---|---:|");
+                foreach (var p in PackageVersionsNoMacroLeftAsIs.OrderBy(x => x.Package, StringComparer.OrdinalIgnoreCase))
+                    sb.AppendLine($"| `{Escape(p.Package)}` | `{Escape(p.Version)}` |");
+                sb.AppendLine();
+            }
+
+            if (PackageVersionsNonNumericLeftAsIs.Count > 0)
+            {
+                sb.AppendLine("## Left as-is (non-numeric version)");
+                sb.AppendLine();
+                sb.AppendLine("| Package | Version |");
+                sb.AppendLine("|---|---:|");
+                foreach (var p in PackageVersionsNonNumericLeftAsIs.OrderBy(x => x.Package, StringComparer.OrdinalIgnoreCase))
+                    sb.AppendLine($"| `{Escape(p.Package)}` | `{Escape(p.Version)}` |");
+                sb.AppendLine();
+            }
+
             return sb.ToString();
         }
 
         private static string Escape(string s) => s.Replace("|", "\\|");
-
-        public readonly record struct Replacement(string Package, string OldVersion, string Macro);
-        public readonly record struct PackageLine(string Package, string Version);
-        public readonly record struct RemovedMacro(string Macro, string Value);
-        public readonly record struct Ambiguity(string Package, string Version, IReadOnlyList<string> Macros, string Chosen);
     }
 }
