@@ -238,19 +238,26 @@ internal static class Program
 
     private static string EnsureImportBuildVersions(string text)
     {
-        // уже есть импорт?
+        // уже есть импорт? (более гибкий поиск)
         if (Regex.IsMatch(text, @"<\s*Import\b[^>]*\bProject\s*=\s*""build\.versions""", RegexOptions.IgnoreCase))
             return text;
 
-        // ищем <Project ...> и вставляем сразу после открывающего тега
-        var m = Regex.Match(text, @"<\s*Project\b[^>]*>", RegexOptions.IgnoreCase);
-        if (!m.Success) return text;
+        // ищем <Project ...>
+        var projectMatch = Regex.Match(text, @"<\s*Project\b[^>]*>", RegexOptions.IgnoreCase);
+        if (!projectMatch.Success) return text;
 
-        // определим перевод строки
         var nl = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var importLine = $"  <Import Project=\"build.versions\" Condition=\"Exists('$(MSBuildThisFileDirectory)build.versions')\" />";
 
-        var importLine = $"{nl}  <Import Project=\"build.versions\" Condition=\"Exists('$(MSBuildThisFileDirectory)build.versions')\" />{nl}";
-        return text.Insert(m.Index + m.Length, importLine);
+        // Попробуем вставить перед первой PropertyGroup или в самое начало (после <Project>)
+        var pgMatch = Regex.Match(text, @"<\s*PropertyGroup\b[^>]*>", RegexOptions.IgnoreCase);
+        if (pgMatch.Success && pgMatch.Index > projectMatch.Index)
+        {
+            // Вставляем перед PropertyGroup с сохранением отступа (предположим 2 пробела)
+            return text.Insert(pgMatch.Index, importLine + nl + nl + "  ");
+        }
+
+        return text.Insert(projectMatch.Index + projectMatch.Length, nl + nl + importLine + nl);
     }
 
     private static string NormalizeBlockForCentral(string block)
@@ -551,41 +558,10 @@ internal static class CsprojMigrator
     {
         var updated = text;
 
-        // 1) PackageReference Version="x"
-        // Собираем Include/Update и Version
+        // 1) Сначала обрабатываем PackageReference с вложенными тегами
+        // Используем балансировку или убеждаемся, что внутри нет других PackageReference
         updated = Regex.Replace(updated,
-            @"<\s*PackageReference\b(?<attrs>[^>]*?)\/\s*>",
-            m =>
-            {
-                var attrs = m.Groups["attrs"].Value;
-
-                var include = GetAttr(attrs, "Include") ?? GetAttr(attrs, "Update");
-                var version = GetAttr(attrs, "Version");
-                var versionOverride = GetAttr(attrs, "VersionOverride");
-
-                if (!string.IsNullOrWhiteSpace(include))
-                {
-                    if (!string.IsNullOrWhiteSpace(version))
-                        central.AddOrUpdate(include!, version!, Path.GetFileName(projectPath));
-
-                    // Если есть VersionOverride, это уже "override в проекте" — требование: убрать конкретные версии из csproj,
-                    // поэтому тоже выносим в центр как PackageVersion (а сам override удаляем)
-                    if (!string.IsNullOrWhiteSpace(versionOverride))
-                        central.AddOrUpdate(include!, versionOverride!, Path.GetFileName(projectPath));
-                }
-
-                // удаляем Version / VersionOverride атрибуты, не трогаем остальные
-                var newAttrs = RemoveAttr(attrs, "Version");
-                newAttrs = RemoveAttr(newAttrs, "VersionOverride");
-
-                return "<PackageReference" + newAttrs + " />";
-            },
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
-        // 2) PackageReference ...> ... <Version>...</Version> ... </PackageReference>
-        // Удаляем теги Version/VersionOverride внутри, но сначала собираем значение.
-        updated = Regex.Replace(updated,
-            @"<\s*PackageReference\b(?<attrs>[^>]*)>(?<inner>.*?)<\s*/\s*PackageReference\s*>",
+            @"<\s*PackageReference\b(?<attrs>[^>]*)>(?<inner>(?:(?!<\s*PackageReference\b).)*?)<\s*/\s*PackageReference\s*>",
             m =>
             {
                 var attrs = m.Groups["attrs"].Value;
@@ -603,18 +579,55 @@ internal static class CsprojMigrator
 
                     if (!string.IsNullOrWhiteSpace(vo))
                         central.AddOrUpdate(include!, vo!, Path.GetFileName(projectPath));
+                    
+                    // Если версий нет в inner, возможно они в атрибутах
+                    if (string.IsNullOrWhiteSpace(v) && string.IsNullOrWhiteSpace(vo))
+                    {
+                        var av = GetAttr(attrs, "Version");
+                        var avo = GetAttr(attrs, "VersionOverride");
+                        if (!string.IsNullOrWhiteSpace(av))
+                            central.AddOrUpdate(include!, av!, Path.GetFileName(projectPath));
+                        if (!string.IsNullOrWhiteSpace(avo))
+                            central.AddOrUpdate(include!, avo!, Path.GetFileName(projectPath));
+                    }
                 }
 
                 var inner2 = RemoveInnerTag(inner, "Version");
                 inner2 = RemoveInnerTag(inner2, "VersionOverride");
 
-                // также убираем Version/VersionOverride атрибуты на всякий случай
                 var attrs2 = RemoveAttr(attrs, "Version");
                 attrs2 = RemoveAttr(attrs2, "VersionOverride");
 
                 return "<PackageReference" + attrs2 + ">" + inner2 + "</PackageReference>";
             },
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+        // 2) Затем обрабатываем самозакрывающиеся PackageReference
+        updated = Regex.Replace(updated,
+            @"<\s*PackageReference\b(?<attrs>[^>]*?)\/\s*>",
+            m =>
+            {
+                var attrs = m.Groups["attrs"].Value;
+
+                var include = GetAttr(attrs, "Include") ?? GetAttr(attrs, "Update");
+                var version = GetAttr(attrs, "Version");
+                var versionOverride = GetAttr(attrs, "VersionOverride");
+
+                if (!string.IsNullOrWhiteSpace(include))
+                {
+                    if (!string.IsNullOrWhiteSpace(version))
+                        central.AddOrUpdate(include!, version!, Path.GetFileName(projectPath));
+
+                    if (!string.IsNullOrWhiteSpace(versionOverride))
+                        central.AddOrUpdate(include!, versionOverride!, Path.GetFileName(projectPath));
+                }
+
+                var newAttrs = RemoveAttr(attrs, "Version");
+                newAttrs = RemoveAttr(newAttrs, "VersionOverride");
+
+                return "<PackageReference" + newAttrs + " />";
+            },
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         return new Result(updated);
     }
@@ -627,7 +640,8 @@ internal static class CsprojMigrator
 
     private static string RemoveAttr(string attrs, string name)
     {
-        // удаляем атрибут, стараясь не портить пробелы
+        // удаляем атрибут, стараясь не портить пробелы. 
+        // Используем \b чтобы не задеть похожие имена.
         return Regex.Replace(attrs,
             $@"\s+\b{name}\s*=\s*""[^""]*""",
             "",
@@ -644,13 +658,14 @@ internal static class CsprojMigrator
     private static string RemoveInnerTag(string inner, string tag)
     {
         return Regex.Replace(inner,
-            $@"(\r?\n)?[ \t]*<\s*{tag}\b[^>]*>.*?<\s*/\s*{tag}\s*>[ \t]*(\r?\n)?",
+            $@"([ \t]*(\r?\n))?[ \t]*<\s*{tag}\b[^>]*>.*?<\s*/\s*{tag}\s*>[ \t]*(\r?\n)?",
             m =>
             {
-                // стараемся не рушить структуру: если тег был отдельной строкой — убираем строку целиком,
-                // иначе просто удаляем содержимое
-                var s = m.Value;
-                if (s.Contains("\n")) return "\n";
+                // Если тег был единственным на строке, удаляем строку целиком.
+                // Группа 2 — это перевод строки перед тегом.
+                // Группа 3 — это перевод строки после тега.
+                if (m.Groups[2].Success && m.Groups[3].Success) return m.Groups[2].Value; // Оставляем один перевод строки
+                if (m.Groups[2].Success || m.Groups[3].Success) return "";
                 return "";
             },
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -740,8 +755,8 @@ internal static class MsbuildText
     // Ищет "прямые" child элементы (очень простая эвристика: строки вида <X>...</X> без вложенности)
     public static IEnumerable<ChildElement> FindDirectChildElements(string propertyGroupInnerText)
     {
-        // msbuild свойства обычно простые: <Name>Value</Name>, без атрибутов
-        var re = new Regex(@"<\s*(?<n>[A-Za-z_][A-Za-z0-9_\.-]*)\s*>(?<v>.*?)<\s*/\s*(?<n2>[A-Za-z_][A-Za-z0-9_\.-]*)\s*>",
+        // msbuild свойства обычно простые: <Name>Value</Name>, но могут быть атрибуты
+        var re = new Regex(@"<\s*(?<n>[A-Za-z_][A-Za-z0-9_\.-]*)\b[^>]*>(?<v>.*?)<\s*/\s*(?<n2>[A-Za-z_][A-Za-z0-9_\.-]*)\s*>",
             RegexOptions.Singleline | RegexOptions.CultureInvariant);
 
         foreach (Match m in re.Matches(propertyGroupInnerText))
