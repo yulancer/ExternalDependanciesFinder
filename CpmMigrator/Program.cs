@@ -153,6 +153,19 @@ internal static class Program
         // 4) Обрабатываем csproj: удаляем версии и собираем их в центральный список PackageVersion
         var centralVersions = new CentralVersionsMap(report);
 
+        // 4.1) Сначала обрабатываем PackageReference в Directory.Build.props
+        foreach (var bp in buildProps)
+        {
+            var currentContent = File.ReadAllText(bp, Encoding.UTF8);
+            var result = CsprojMigrator.RemovePackageReferenceVersionsAndCollect(currentContent, centralVersions, bp, report);
+            if (!string.Equals(result.UpdatedText, currentContent, StringComparison.Ordinal))
+            {
+                File.WriteAllText(bp, result.UpdatedText, Encoding.UTF8);
+                if (!report.FilesModified.Contains(bp, StringComparer.OrdinalIgnoreCase))
+                    report.FilesModified.Add(bp);
+            }
+        }
+
         foreach (var proj in projects)
         {
             var original = File.ReadAllText(proj, Encoding.UTF8);
