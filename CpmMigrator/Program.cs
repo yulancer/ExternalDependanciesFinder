@@ -53,107 +53,10 @@ internal static class Program
             return 0;
         }
 
-        // 2) Извлекаем макросы *Version из Directory.Build.props (перенос в build.versions)
-        var movedMacroBlocks = new List<string>(); // целые PropertyGroup блоки
-        var movedMacroElements = new List<string>(); // отдельные элементы, если группа смешанная
-
-        foreach (var bp in buildProps)
-        {
-            var original = File.ReadAllText(bp, Encoding.UTF8);
-            var updated = original;
-
-            // Сначала пробуем переносить целыми PropertyGroup блоками (если "чисто про версии")
-            var groups = MsbuildText.FindTopLevelElements(updated, "PropertyGroup").ToList();
-
-            var groupsToRemove = new List<(int start, int end, string text)>();
-
-            foreach (var g in groups)
-            {
-                var inner = g.InnerText;
-
-                // Найдём имена property элементов верхнего уровня внутри group (простая эвристика)
-                var propNames = MsbuildText.FindDirectChildElementNames(inner).ToList();
-                if (propNames.Count == 0) continue;
-
-                var hasVersionProps = propNames.Any(n => n.EndsWith("Version", StringComparison.OrdinalIgnoreCase));
-                if (!hasVersionProps) continue;
-
-                // "Чистая" группа, если ВСЕ свойства — это *Version (разрешаем комментарии/пустое)
-                var hasNonVersionProps = propNames.Any(n => !n.EndsWith("Version", StringComparison.OrdinalIgnoreCase));
-                if (!hasNonVersionProps)
-                {
-                    groupsToRemove.Add((g.StartIndex, g.EndIndexExclusive, g.OuterText));
-                }
-            }
-
-            // Удаляем группы с конца к началу (чтобы индексы не поплыли)
-            if (groupsToRemove.Count > 0)
-            {
-                foreach (var rem in groupsToRemove.OrderByDescending(x => x.start))
-                {
-                    movedMacroBlocks.Add(NormalizeBlockForCentral(rem.text));
-                    updated = updated.Remove(rem.start, rem.end - rem.start);
-                    report.MacrosMovedGroups++;
-                }
-            }
-
-            // Если есть смешанные группы — переносим отдельные элементы *Version
-            // (делаем после удаления целых групп, чтобы не переносить дважды)
-            var groups2 = MsbuildText.FindTopLevelElements(updated, "PropertyGroup").ToList();
-            bool changed = groupsToRemove.Count > 0;
-
-            foreach (var g in groups2)
-            {
-                var inner = g.InnerText;
-
-                // Находим элементы вида <XxxVersion>...</XxxVersion> (простая, но рабочая эвристика)
-                var versionElements = MsbuildText.FindDirectChildElements(inner)
-                    .Where(e => e.Name.EndsWith("Version", StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                if (versionElements.Count == 0) continue;
-
-                // переносим каждый элемент, удаляем из исходника
-                var innerUpdated = inner;
-                foreach (var ve in versionElements.OrderByDescending(v => v.StartIndex))
-                {
-                    movedMacroElements.Add(ve.OuterText.TrimEnd());
-                    innerUpdated = innerUpdated.Remove(ve.StartIndex, ve.EndIndexExclusive - ve.StartIndex);
-                    report.MacrosMovedElements++;
-                    changed = true;
-                }
-
-                if (!ReferenceEquals(innerUpdated, inner))
-                {
-                    // пересобираем PropertyGroup с тем же outer, заменив inner кусок
-                    updated = updated.Remove(g.StartIndex, g.EndIndexExclusive - g.StartIndex)
-                        .Insert(g.StartIndex, g.PrefixBeforeInner + innerUpdated + g.SuffixAfterInner);
-                }
-            }
-
-            if (!string.Equals(updated, original, StringComparison.Ordinal))
-            {
-                File.WriteAllText(bp, updated, Encoding.UTF8);
-                report.FilesModified.Add(bp);
-
-                // после изменения добавим Import (можно сразу здесь)
-            }
-
-            // 3) Гарантируем Import build.versions в каждом Directory.Build.props
-            var afterImport = EnsureImportBuildVersions(File.ReadAllText(bp, Encoding.UTF8));
-            if (!string.Equals(afterImport, File.ReadAllText(bp, Encoding.UTF8), StringComparison.Ordinal))
-            {
-                File.WriteAllText(bp, afterImport, Encoding.UTF8);
-                if (!report.FilesModified.Contains(bp, StringComparer.OrdinalIgnoreCase))
-                    report.FilesModified.Add(bp);
-                report.ImportsAdded++;
-            }
-        }
-
-        // 4) Обрабатываем csproj: удаляем версии и собираем их в центральный список PackageVersion
+        // 2) Обрабатываем csproj: удаляем версии и собираем их в центральный список PackageVersion
         var centralVersions = new CentralVersionsMap(report);
 
-        // 4.1) Сначала обрабатываем PackageReference в Directory.Build.props
+        // 2.1) Сначала обрабатываем PackageReference в Directory.Build.props
         foreach (var bp in buildProps)
         {
             var currentContent = File.ReadAllText(bp, Encoding.UTF8);
@@ -182,18 +85,16 @@ internal static class Program
             }
         }
 
-        // 5) Пишем build.versions в корень
+        // 3) Пишем build.versions в корень
         var centralPath = Path.Combine(root, CentralFileName);
 
         var centralContent = CentralFileWriter.BuildCentralFileText(
-            movedMacroBlocks: movedMacroBlocks,
-            movedMacroElements: movedMacroElements,
             packageVersions: centralVersions.GetOrderedPackageVersions());
 
         File.WriteAllText(centralPath, centralContent, Encoding.UTF8);
         report.FilesCreatedOrOverwritten.Add(centralPath);
 
-        // 6) Итоговый отчет
+        // 4) Итоговый отчет
         WriteReport(root, report);
 
         Console.WriteLine("[CPM] Готово.");
@@ -248,38 +149,6 @@ internal static class Program
         var p = path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
         return BuildOutputMarkers.Any(m => p.IndexOf(m, StringComparison.OrdinalIgnoreCase) >= 0);
     }
-
-    private static string EnsureImportBuildVersions(string text)
-    {
-        // уже есть импорт? (более гибкий поиск)
-        if (Regex.IsMatch(text, @"<\s*Import\b[^>]*\bProject\s*=\s*""build\.versions""", RegexOptions.IgnoreCase))
-            return text;
-
-        // ищем <Project ...>
-        var projectMatch = Regex.Match(text, @"<\s*Project\b[^>]*>", RegexOptions.IgnoreCase);
-        if (!projectMatch.Success) return text;
-
-        var nl = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var importLine = $"  <Import Project=\"build.versions\" Condition=\"Exists('$(MSBuildThisFileDirectory)build.versions')\" />";
-
-        // Попробуем вставить перед первой PropertyGroup или в самое начало (после <Project>)
-        var pgMatch = Regex.Match(text, @"<\s*PropertyGroup\b[^>]*>", RegexOptions.IgnoreCase);
-        if (pgMatch.Success && pgMatch.Index > projectMatch.Index)
-        {
-            // Вставляем перед PropertyGroup с сохранением отступа (предположим 2 пробела)
-            return text.Insert(pgMatch.Index, importLine + nl + nl + "  ");
-        }
-
-        return text.Insert(projectMatch.Index + projectMatch.Length, nl + nl + importLine + nl);
-    }
-
-    private static string NormalizeBlockForCentral(string block)
-    {
-        // В центральный файл переносим как есть, но:
-        // - убираем ведущие/хвостовые пустые строки
-        // - не добавляем xmlns и т.п.
-        return block.Trim('\r', '\n');
-    }
 }
 
 internal sealed class MdReport
@@ -301,9 +170,6 @@ internal sealed class MdReport
     public List<string> FilesModified { get; } = new();
     public List<string> FilesCreatedOrOverwritten { get; } = new();
 
-    public int MacrosMovedGroups { get; set; }
-    public int MacrosMovedElements { get; set; }
-    public int ImportsAdded { get; set; }
     public int ProjectsModified { get; set; }
 
     public int PackageVersionsCollected { get; set; }
@@ -330,9 +196,6 @@ internal sealed class MdReport
 
         sb.AppendLine("## Сделано");
         sb.AppendLine();
-        sb.AppendLine($"- Перенесено PropertyGroup с макросами *Version: **{MacrosMovedGroups}**");
-        sb.AppendLine($"- Перенесено отдельных элементов *Version из смешанных групп: **{MacrosMovedElements}**");
-        sb.AppendLine($"- Добавлено Import build.versions в Directory.Build.props: **{ImportsAdded}**");
         sb.AppendLine($"- Проектов (csproj) изменено: **{ProjectsModified}**");
         sb.AppendLine($"- Собрано PackageVersion: **{PackageVersionsCollected}**");
         sb.AppendLine();
@@ -366,7 +229,6 @@ internal sealed class MdReport
 
         sb.AppendLine("## Примечания");
         sb.AppendLine();
-        sb.AppendLine("- Приложение старается не менять форматирование, но при удалении отдельных элементов из смешанных `PropertyGroup` возможно появление лишних пустых строк.");
         sb.AppendLine("- XML схемы/`xmlns` не добавляются.");
         sb.AppendLine();
 
@@ -461,8 +323,6 @@ internal sealed class CentralVersionsMap
 internal static class CentralFileWriter
 {
     public static string BuildCentralFileText(
-        List<string> movedMacroBlocks,
-        List<string> movedMacroElements,
         IReadOnlyList<(string PackageId, string Version)> packageVersions)
     {
         var nl = "\r\n";
@@ -481,50 +341,13 @@ internal static class CentralFileWriter
         sb.Append(nl);
         sb.Append("    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>");
         sb.Append(nl);
-        sb.Append("    <CentralPackageVersionOverrideEnabled>true</CentralPackageVersionOverrideEnabled>");
+        sb.Append("    <CentralPackageVersionOverrideEnabled>false</CentralPackageVersionOverrideEnabled>");
         sb.Append(nl);
         sb.Append("  </PropertyGroup>");
         sb.Append(nl);
         sb.Append(nl);
 
-        // 2) Перенесённые целые PropertyGroup блоки с макросами
-        if (movedMacroBlocks.Count > 0)
-        {
-            sb.Append("  <!-- Макросы версий, перенесенные из Directory.Build.props -->");
-            sb.Append(nl);
-
-            foreach (var block in movedMacroBlocks)
-            {
-                // Вставляем как есть, но обеспечим отступ 2 пробела для корня
-                sb.Append(IndentBlock(block, "  "));
-                sb.Append(nl);
-                sb.Append(nl);
-            }
-        }
-
-        // 3) Если переносили отдельные элементы *Version (из смешанных групп), положим их в отдельную PropertyGroup
-        if (movedMacroElements.Count > 0)
-        {
-            sb.Append("  <PropertyGroup>");
-            sb.Append(nl);
-            sb.Append("    <!-- Макросы версий, извлеченные из смешанных PropertyGroup -->");
-            sb.Append(nl);
-
-            foreach (var el in movedMacroElements)
-            {
-                // Попробуем сохранить исходный отступ, но гарантируем что внутри PG будет минимум 4 пробела
-                var trimmed = el.Trim();
-                sb.Append("    ");
-                sb.Append(trimmed);
-                sb.Append(nl);
-            }
-
-            sb.Append("  </PropertyGroup>");
-            sb.Append(nl);
-            sb.Append(nl);
-        }
-
-        // 4) Пакетные версии
+        // 2) Пакетные версии
         sb.Append("  <ItemGroup>");
         sb.Append(nl);
 
@@ -546,13 +369,6 @@ internal static class CentralFileWriter
         sb.Append(nl);
 
         return sb.ToString();
-    }
-
-    private static string IndentBlock(string block, string indent)
-    {
-        var nl = block.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var lines = block.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
-        return string.Join(nl, lines.Select(l => indent + l));
     }
 
     private static string EscapeXmlAttr(string s)
