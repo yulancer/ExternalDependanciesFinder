@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -16,19 +17,20 @@ public static class NuGetMaxAccessibleVersion
     {
         if (args.Length < 1)
         {
-            Console.Error.WriteLine("Usage: dotnet run -- <PackageId> [SourceUrlOrName] [--no-prerelease]");
+            PrintUsage();
             return 2;
         }
 
-        var includePrerelease = !args.Any(a => a.Equals("--no-prerelease", StringComparison.OrdinalIgnoreCase));
+        bool listAll = HasFlag(args, "--list", "--all", "--list-all");
+        bool includePrerelease = !HasFlag(args, "--no-prerelease", "--stable", "--stable-only");
 
-        // Берём только позиционные аргументы (не флаги):
+        // Positional args (не начинаются с --):
         // 1) PackageId
-        // 2) SourceUrlOrName (опционально)
+        // 2) SourceUrlOrName (optional)
         var positional = args.Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
         if (positional.Length < 1)
         {
-            Console.Error.WriteLine("Usage: dotnet run -- <PackageId> [SourceUrlOrName] [--no-prerelease]");
+            PrintUsage();
             return 2;
         }
 
@@ -37,18 +39,51 @@ public static class NuGetMaxAccessibleVersion
 
         var logger = NullLogger.Instance;
         var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
+        var ct = cts.Token;
 
-        var result = await GetMaxAccessibleVersionAsync(packageId, sourceFilter, includePrerelease, logger, cts.Token);
-
-        if (result is null)
+        if (listAll)
         {
-            Console.WriteLine("No accessible version found.");
-            return 1;
-        }
+            var versions = await GetAllAccessibleVersionsAsync(packageId, sourceFilter, includePrerelease, logger, ct);
 
-        Console.WriteLine(result.ToNormalizedString());
-        return 0;
+            if (versions.Count == 0)
+            {
+                Console.WriteLine("No accessible versions found.");
+                return 1;
+            }
+
+            // Выводим по одной на строку, от новых к старым
+            foreach (var v in versions.OrderByDescending(v => v))
+                Console.WriteLine(v.ToNormalizedString());
+
+            return 0;
+        }
+        else
+        {
+            var best = await GetMaxAccessibleVersionAsync(packageId, sourceFilter, includePrerelease, logger, ct);
+
+            if (best is null)
+            {
+                Console.WriteLine("No accessible version found.");
+                return 1;
+            }
+
+            Console.WriteLine(best.ToNormalizedString());
+            return 0;
+        }
     }
+
+    private static void PrintUsage()
+    {
+        Console.Error.WriteLine("Usage:");
+        Console.Error.WriteLine("  dotnet run -- <PackageId> [SourceUrlOrName] [--no-prerelease] [--list]");
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("Flags:");
+        Console.Error.WriteLine("  --no-prerelease | --stable | --stable-only   Exclude prerelease versions");
+        Console.Error.WriteLine("  --list | --all | --list-all                  Print all accessible versions");
+    }
+
+    private static bool HasFlag(string[] args, params string[] flags) =>
+        args.Any(a => flags.Any(f => a.Equals(f, StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
     /// Returns the newest version that is реально доступна (nupkg скачивается без 401/403).
@@ -62,7 +97,127 @@ public static class NuGetMaxAccessibleVersion
         ILogger logger,
         CancellationToken ct)
     {
-        // 1) Load current NuGet settings (does NOT modify config)
+        var sources = LoadEnabledSources(sourceFilter);
+        if (sources.Count == 0)
+            return null;
+
+        var repoProvider = CreateRepoProvider(sources);
+
+        NuGetVersion? best = null;
+
+        foreach (var src in sources)
+        {
+            var repo = repoProvider.CreateRepository(src);
+
+            FindPackageByIdResource find;
+            try
+            {
+                find = await repo.GetResourceAsync<FindPackageByIdResource>(ct);
+            }
+            catch
+            {
+                continue;
+            }
+
+            NuGetVersion[] versions;
+            try
+            {
+                var cache = new SourceCacheContext();
+                versions = (await find.GetAllVersionsAsync(packageId, cache, logger, ct))
+                    .Where(v => includePrerelease || !v.IsPrerelease)
+                    .OrderByDescending(v => v)
+                    .ToArray();
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var v in versions)
+            {
+                if (best != null && v <= best)
+                    break;
+
+                if (await CanDownloadNupkgAsync(find, packageId, v, logger, ct))
+                {
+                    best = v;
+                    break; // newest accessible for this source
+                }
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Returns ALL versions that are реально доступны (nupkg скачивается без 401/403).
+    /// Собирает со всех источников, дедуплицирует, сортировка по убыванию — у вызывающего.
+    /// </summary>
+    public static async Task<List<NuGetVersion>> GetAllAccessibleVersionsAsync(
+        string packageId,
+        string? sourceFilter,
+        bool includePrerelease,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var sources = LoadEnabledSources(sourceFilter);
+        if (sources.Count == 0)
+            return new List<NuGetVersion>();
+
+        var repoProvider = CreateRepoProvider(sources);
+
+        var accessible = new HashSet<NuGetVersion>();
+
+        foreach (var src in sources)
+        {
+            var repo = repoProvider.CreateRepository(src);
+
+            FindPackageByIdResource find;
+            try
+            {
+                find = await repo.GetResourceAsync<FindPackageByIdResource>(ct);
+            }
+            catch
+            {
+                continue;
+            }
+
+            IEnumerable<NuGetVersion> versions;
+            try
+            {
+                var cache = new SourceCacheContext();
+                versions = await find.GetAllVersionsAsync(packageId, cache, logger, ct);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var v in versions)
+            {
+                if (!includePrerelease && v.IsPrerelease)
+                    continue;
+
+                // Чтобы не проверять одно и то же несколько раз
+                if (!accessible.Add(v))
+                    continue;
+
+                // Реальная проверка доступности (403/401 пропускаем)
+                if (!await CanDownloadNupkgAsync(find, packageId, v, logger, ct))
+                {
+                    // Если не доступна на этом source — возможно доступна на другом.
+                    // Поэтому удаляем из set НЕ нужно: доступность подтверждаем успешной скачкой.
+                    // Но мы уже добавили v в set — надо откатить:
+                    accessible.Remove(v);
+                }
+            }
+        }
+
+        return accessible.OrderByDescending(v => v).ToList();
+    }
+
+    private static List<PackageSource> LoadEnabledSources(string? sourceFilter)
+    {
         ISettings settings = Settings.LoadDefaultSettings(
             root: Directory.GetCurrentDirectory(),
             configFileName: null,
@@ -81,59 +236,25 @@ public static class NuGetMaxAccessibleVersion
                 .ToList();
         }
 
-        if (sources.Count == 0)
-            return null;
+        return sources;
+    }
 
-        // NuGet V3 providers
+    private static SourceRepositoryProvider CreateRepoProvider(List<PackageSource> sources)
+    {
+        // Важно: используем те же settings/credentials, что и dotnet restore (ничего не меняем)
+        // SourceRepositoryProvider создаётся от PackageSourceProvider,
+        // но нам достаточно передать providers и потом CreateRepository(PackageSource).
+
+        // Для CreateRepoProvider нужно иметь sourceProvider. Проще пересоздать здесь:
+        ISettings settings = Settings.LoadDefaultSettings(
+            root: Directory.GetCurrentDirectory(),
+            configFileName: null,
+            machineWideSettings: new XPlatMachineWideSetting());
+
+        var sourceProvider = new PackageSourceProvider(settings);
+
         var providers = Repository.Provider.GetCoreV3();
-        var repoProvider = new SourceRepositoryProvider(sourceProvider, providers);
-
-        NuGetVersion? best = null;
-
-        foreach (var src in sources)
-        {
-            var repo = repoProvider.CreateRepository(src);
-
-            FindPackageByIdResource find;
-            try
-            {
-                find = await repo.GetResourceAsync<FindPackageByIdResource>(ct);
-            }
-            catch
-            {
-                // source not reachable / not a V3 feed / blocked
-                continue;
-            }
-
-            NuGetVersion[] versions;
-            try
-            {
-                var cache = new SourceCacheContext();
-                versions = (await find.GetAllVersionsAsync(packageId, cache, logger, ct))
-                    .Where(v => includePrerelease || !v.IsPrerelease)
-                    .OrderByDescending(v => v)
-                    .ToArray();
-            }
-            catch
-            {
-                // metadata request may fail (auth/network/etc.)
-                continue;
-            }
-
-            foreach (var v in versions)
-            {
-                if (best != null && v <= best)
-                    break; // even if accessible, it can't beat current best
-
-                if (await CanDownloadNupkgAsync(find, packageId, v, logger, ct))
-                {
-                    best = v;
-                    break; // newest accessible for this source
-                }
-            }
-        }
-
-        return best;
+        return new SourceRepositoryProvider(sourceProvider, providers);
     }
 
     private static async Task<bool> CanDownloadNupkgAsync(
@@ -146,23 +267,23 @@ public static class NuGetMaxAccessibleVersion
         try
         {
             using var ms = new MemoryStream();
-            // If package exists and is downloadable, returns true and writes to stream
             var cache = new SourceCacheContext();
-            var ok = await find.CopyNupkgToStreamAsync(packageId, version, ms, cacheContext: cache, logger, ct);
+            var ok = await find.CopyNupkgToStreamAsync(packageId, version, ms, cache, logger, ct);
             return ok;
         }
-        catch (NuGetProtocolException ex) when (TryGetHttpStatus(ex, out var code) && (code == HttpStatusCode.Forbidden || code == HttpStatusCode.Unauthorized))
+        catch (NuGetProtocolException ex) when (TryGetHttpStatus(ex, out var code) &&
+                                               (code == HttpStatusCode.Forbidden || code == HttpStatusCode.Unauthorized))
         {
             return false;
         }
-        catch (HttpRequestException ex) when (TryGetHttpStatus(ex, out var code) && (code == HttpStatusCode.Forbidden || code == HttpStatusCode.Unauthorized))
+        catch (HttpRequestException ex) when (TryGetHttpStatus(ex, out var code) &&
+                                              (code == HttpStatusCode.Forbidden || code == HttpStatusCode.Unauthorized))
         {
             return false;
         }
         catch
         {
-            // Другие ошибки (временный network, 5xx, etc.) — по желанию:
-            // можно считать "не доступно" или пробрасывать наружу.
+            // Любые прочие ошибки считаем "не удалось подтвердить доступность"
             return false;
         }
     }
@@ -171,14 +292,12 @@ public static class NuGetMaxAccessibleVersion
     {
         status = default;
 
-        // HttpRequestException in .NET 5+ может содержать StatusCode
         if (ex is HttpRequestException hre && hre.StatusCode is HttpStatusCode sc)
         {
             status = sc;
             return true;
         }
 
-        // NuGetProtocolException часто заворачивает inner HttpRequestException
         var inner = ex.InnerException;
         while (inner != null)
         {
