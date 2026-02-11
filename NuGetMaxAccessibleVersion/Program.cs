@@ -16,17 +16,29 @@ public static class NuGetMaxAccessibleVersion
     {
         if (args.Length < 1)
         {
-            Console.Error.WriteLine("Usage: dotnet run -- <PackageId> [SourceUrlOrName]");
+            Console.Error.WriteLine("Usage: dotnet run -- <PackageId> [SourceUrlOrName] [--no-prerelease]");
             return 2;
         }
 
-        var packageId = args[0];
-        var sourceFilter = args.Length >= 2 ? args[1] : null;
+        var includePrerelease = !args.Any(a => a.Equals("--no-prerelease", StringComparison.OrdinalIgnoreCase));
+
+        // Берём только позиционные аргументы (не флаги):
+        // 1) PackageId
+        // 2) SourceUrlOrName (опционально)
+        var positional = args.Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
+        if (positional.Length < 1)
+        {
+            Console.Error.WriteLine("Usage: dotnet run -- <PackageId> [SourceUrlOrName] [--no-prerelease]");
+            return 2;
+        }
+
+        var packageId = positional[0];
+        var sourceFilter = positional.Length >= 2 ? positional[1] : null;
 
         var logger = NullLogger.Instance;
         var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
 
-        var result = await GetMaxAccessibleVersionAsync(packageId, sourceFilter, logger, cts.Token);
+        var result = await GetMaxAccessibleVersionAsync(packageId, sourceFilter, includePrerelease, logger, cts.Token);
 
         if (result is null)
         {
@@ -46,6 +58,7 @@ public static class NuGetMaxAccessibleVersion
     public static async Task<NuGetVersion?> GetMaxAccessibleVersionAsync(
         string packageId,
         string? sourceFilter,
+        bool includePrerelease,
         ILogger logger,
         CancellationToken ct)
     {
@@ -97,6 +110,7 @@ public static class NuGetMaxAccessibleVersion
             {
                 var cache = new SourceCacheContext();
                 versions = (await find.GetAllVersionsAsync(packageId, cache, logger, ct))
+                    .Where(v => includePrerelease || !v.IsPrerelease)
                     .OrderByDescending(v => v)
                     .ToArray();
             }
