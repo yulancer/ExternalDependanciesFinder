@@ -2,7 +2,7 @@
 using System.Text;
 using NuGet.Versioning;
 
-const string HelpText = @"ExternalDependanciesFinder
+const string HelpText = @"ExternalDependenciesFinder
 
 Назначение:
   Ищет прямые и транзитивные NuGet-зависимости в .NET-решении или наборе *.csproj,
@@ -10,7 +10,7 @@ const string HelpText = @"ExternalDependanciesFinder
   создаёт служебное решение для проверки restore/build.
 
 Использование:
-  ExternalDependanciesFinder [scanRoot] [options]
+  ExternalDependenciesFinder [scanRoot] [options]
 
 Аргументы:
   scanRoot                         Папка для анализа. Если не указана, используется текущая папка.
@@ -47,10 +47,10 @@ const string HelpText = @"ExternalDependanciesFinder
   --help, -h                       Показать справку.
 
 Примеры:
-  ExternalDependanciesFinder ""C:\Projects\Repo""
-  ExternalDependanciesFinder ""C:\Projects\Repo"" --list-only
-  ExternalDependanciesFinder ""C:\Projects\Repo"" --framework net6.0 --no-build
-  ExternalDependanciesFinder ""C:\Projects\Repo"" --exclude-prefix Abdt. --output-dir ""D:\Temp\ExternalDeps""
+  ExternalDependenciesFinder ""C:\Projects\Repo""
+  ExternalDependenciesFinder ""C:\Projects\Repo"" --list-only
+  ExternalDependenciesFinder ""C:\Projects\Repo"" --framework net6.0 --no-build
+  ExternalDependenciesFinder ""C:\Projects\Repo"" --exclude-prefix Abdt. --output-dir ""D:\Temp\ExternalDeps""
 ";
 var options = Options.Parse(args);
 
@@ -73,7 +73,7 @@ var report = new ReportWriter(
     Path.Combine(options.LogDirectory, "ExternalDependanciesFinder_Errors.txt"),
     Path.Combine(options.LogDirectory, "dotnet-list-package.log"));
 
-report.WriteInfo("ExternalDependanciesFinder started");
+report.WriteInfo("ExternalDependenciesFinder started");
 report.WriteInfo($"Scan root: {options.ScanRoot}");
 report.WriteInfo($"Output file: {options.PackagesOutputPath}");
 report.WriteInfo($"Generated solution directory: {options.OutputDirectory}");
@@ -105,7 +105,7 @@ try
     Console.WriteLine($"Служебное решение: {Path.Combine(options.OutputDirectory, $"{options.SolutionName}.sln")}");
     Console.WriteLine($"Логи: {options.LogDirectory}");
 
-    report.WriteInfo("ExternalDependanciesFinder finished successfully");
+    report.WriteInfo("ExternalDependenciesFinder finished successfully");
     return 0;
 }
 catch (Exception ex)

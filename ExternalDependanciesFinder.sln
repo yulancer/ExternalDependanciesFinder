@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependanciesFinder", "ExternalDependanciesFinder\ExternalDependanciesFinder.csproj", "{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependenciesFinder", "ExternalDependenciesFinder\ExternalDependenciesFinder.csproj", "{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Net8Fixer", "Net8Fixer\Net8Fixer.csproj", "{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}"
 EndProject
