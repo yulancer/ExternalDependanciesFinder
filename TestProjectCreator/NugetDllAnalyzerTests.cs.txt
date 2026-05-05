@@ -1,0 +1,821 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using Xunit;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Runtime.Serialization;
+using Xunit.Abstractions;
+
+public class NugetDllAnalyzerTests
+{
+    // Статическое поле для хранения ITestOutputHelper
+    private static ITestOutputHelper StaticOutput;
+
+    // Случайный генератор и целевая сборка
+    private static Assembly _targetAssembly;
+    private static Random _random = new Random();
+    private const int MaxRecursionDepth = 5;
+
+    // Конструктор получает ITestOutputHelper и сохраняет его в статическом поле
+    public NugetDllAnalyzerTests(ITestOutputHelper output)
+    {
+        StaticOutput = output;
+    }
+
+    // Статический метод для логирования, доступный из статического контекста
+    private static void LogAndPrint(StringBuilder report, string message)
+    {
+        report.AppendLine(message);
+        StaticOutput.WriteLine(message);
+    }
+
+    [Fact]
+    public void AnalyzeTargetDll()
+    {
+        string dllPath = Path.GetFullPath("TestingNugetLibrary.dll");
+        StringBuilder report = new StringBuilder();
+        LogAndPrint(report, $"Testing DLL: {dllPath}\n");
+
+        if (!File.Exists(dllPath))
+            throw new FileNotFoundException("DLL not found in the current directory.");
+
+        try
+        {
+            var context = new System.Runtime.Loader.AssemblyLoadContext(null, true);
+            Assembly assembly = context.LoadFromAssemblyPath(dllPath);
+            _targetAssembly = assembly;
+
+            LogAssemblyResources(assembly, report);
+            foreach (Type type in assembly.GetTypes().Where(t => !t.IsByRefLike))
+            {
+                if (type.ContainsGenericParameters)
+                {
+                    foreach (Type[] typeArgs in GetTypeArgCombos(type))
+                    {
+                        try
+                        {
+                            Type closedType = type.MakeGenericType(typeArgs);
+                            AnalyzeType(closedType, report);
+                        }
+                        catch (Exception ex)
+                        {
+                            LogAndPrint(report,
+                                $"  Failed to analyze generic type {type.FullName}<{string.Join(", ", typeArgs.Select(t => t.Name))}>: {ex.Message}");
+                        }
+                    }
+
+                    continue;
+                }
+
+                AnalyzeType(type, report);
+            }
+
+            context.Unload();
+        }
+        catch (Exception ex)
+        {
+            LogAndPrint(report, $"Failed to load target assembly: {ex.Message}");
+        }
+
+        File.WriteAllText("TargetDllTestReport.txt", report.ToString());
+        Assert.True(File.Exists("TargetDllTestReport.txt"), "Test report was not generated.");
+    }
+
+    #region Helpers for Low-Level Value Generation
+
+    private static object GetDefault(Type type, int depth = 0)
+    {
+        if (depth > MaxRecursionDepth)
+            return null;
+
+        if (TryGetSimpleDefault(type, out object simple))
+            return simple;
+
+        return type switch
+        {
+            _ when type.IsEnum => GetEnumDefault(type),
+            _ when type.IsArray => GetArrayDefault(type, depth),
+            _ when type.IsByRefLike || type.ContainsGenericParameters => null,
+            _ when type.IsAbstract || type.IsInterface => GetDefaultForInterfaceOrAbstract(type, depth),
+            _ when type.IsValueType => Activator.CreateInstance(type),
+            _ => CreateInstance(type, depth + 1)
+        };
+    }
+
+    private static bool TryGetSimpleDefault(Type type, out object value)
+    {
+        value = type switch
+        {
+            _ when type == typeof(string) => "string",
+            _ when type == typeof(DateTime) => DateTime.Now,
+            _ when type == typeof(bool) => _random.Next(2) == 0,
+            _ when type == typeof(int) => _random.Next(-100, 101),
+            _ when type == typeof(long) => (long) _random.Next(-100, 101),
+            _ when type == typeof(double) => _random.NextDouble() * 200 - 100,
+            _ when type == typeof(float) => (float) (_random.NextDouble() * 200 - 100),
+            _ when type == typeof(byte) => (byte) _random.Next(0, 256),
+            _ when type == typeof(short) => (short) _random.Next(-100, 101),
+            _ when type == typeof(char) => (char) ('A' + _random.Next(26)),
+            _ when type == typeof(decimal) => (decimal) (_random.NextDouble() * 100 - 50),
+            _ when type == typeof(Guid) => Guid.NewGuid(),
+            _ => null
+        };
+        return value != null;
+    }
+
+    private static object GetEnumDefault(Type type)
+    {
+        var values = Enum.GetValues(type);
+        return values.Length > 0 ? values.GetValue(_random.Next(values.Length)) : Activator.CreateInstance(type);
+    }
+
+    private static object GetArrayDefault(Type type, int depth)
+    {
+        Type elemType = type.GetElementType();
+        if (elemType == null)
+            return null;
+        Array arr = Array.CreateInstance(elemType, 1);
+        object elemVal = GetDefault(elemType, depth + 1);
+        if (elemVal != null || elemType.IsValueType)
+            arr.SetValue(elemVal, 0);
+        return arr;
+    }
+
+    private static object GetDefaultForInterfaceOrAbstract(Type type, int depth)
+    {
+        if (_targetAssembly != null)
+        {
+            Type impl = _targetAssembly.GetTypes()
+                .FirstOrDefault(t =>
+                    type.IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface && !t.ContainsGenericParameters);
+            if (impl != null)
+                return CreateInstance(impl, depth + 1);
+        }
+
+        return type switch
+        {
+            _ when type == typeof(Stream) => new MemoryStream(),
+            _ when type == typeof(TextReader) => new StringReader(string.Empty),
+            _ when type == typeof(TextWriter) => new StringWriter(),
+            _ => null
+        };
+    }
+
+    private static object CreateInstance(Type type, int depth = 0)
+    {
+        if (depth > MaxRecursionDepth || type.IsAbstract || type.IsInterface || type.IsByRefLike ||
+            type.ContainsGenericParameters)
+            return null;
+
+        var ctor = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .FirstOrDefault(c => c.GetParameters().All(p => p.HasDefaultValue));
+        if (ctor != null)
+        {
+            var args = ctor.GetParameters()
+                .Select(p =>
+                    p.HasDefaultValue
+                        ? p.DefaultValue ?? GetDefault(p.ParameterType, depth + 1)
+                        : GetDefault(p.ParameterType, depth + 1))
+                .ToArray();
+            if (args.Any(p => p == null && !(p?.GetType().IsValueType ?? true)))
+                return null;
+            try
+            {
+                return ctor.Invoke(args.Length > 0 ? args : null);
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
+    #endregion
+
+    #region Candidate Types for Generic Parameters
+
+    private static List<Type> GetCandidateTypesForParam(Type genericParam)
+    {
+        var candidates = new List<Type>();
+        if (!genericParam.IsGenericParameter)
+            return candidates;
+        Type[] constraints = genericParam.GetGenericParameterConstraints();
+        var attrs = genericParam.GenericParameterAttributes;
+        bool mustBeStruct = (attrs & GenericParameterAttributes.NotNullableValueTypeConstraint) != 0;
+        bool mustBeClass = (attrs & GenericParameterAttributes.ReferenceTypeConstraint) != 0;
+        bool mustHaveDefaultCtor = (attrs & GenericParameterAttributes.DefaultConstructorConstraint) != 0;
+        Type baseConstraint = constraints.FirstOrDefault(c => !c.IsInterface);
+        var interfaceConstraints = constraints.Where(c => c.IsInterface).ToList();
+
+        // Поиск кандидатов из целевой сборки
+        if (_targetAssembly != null)
+        {
+            foreach (Type t in _targetAssembly.GetTypes())
+            {
+                if (SatisfiesConstraints(t, mustBeStruct, mustBeClass, baseConstraint, interfaceConstraints,
+                        mustHaveDefaultCtor))
+                {
+                    candidates.Add(t);
+                    if (candidates.Count > 1)
+                        break;
+                }
+            }
+        }
+
+        // Добавляем распространённые типы
+        var commonTypes = new List<Type>
+            {typeof(string), typeof(int), typeof(bool), typeof(object), typeof(double), typeof(DateTime)};
+        foreach (Type ct in commonTypes)
+        {
+            if (SatisfiesConstraints(ct, mustBeStruct, mustBeClass, baseConstraint, interfaceConstraints,
+                    mustHaveDefaultCtor))
+            {
+                candidates.Add(ct);
+                if (candidates.Count > 1)
+                    break;
+            }
+        }
+
+        return candidates.Distinct().ToList();
+    }
+
+    private static bool SatisfiesConstraints(
+        Type candidate,
+        bool mustBeStruct,
+        bool mustBeClass,
+        Type baseConstraint,
+        IEnumerable<Type> interfaceConstraints,
+        bool mustHaveDefaultCtor)
+    {
+        return !candidate.IsAbstract &&
+               !candidate.ContainsGenericParameters &&
+               (!mustBeStruct || candidate.IsValueType) &&
+               (!mustBeClass || (candidate.IsClass && !candidate.IsValueType)) &&
+               (baseConstraint == null || !baseConstraint.IsClass ||
+                (candidate == baseConstraint || candidate.IsSubclassOf(baseConstraint))) &&
+               interfaceConstraints.All(iface => iface.IsAssignableFrom(candidate)) &&
+               (!mustHaveDefaultCtor || candidate.IsValueType || candidate.GetConstructor(Type.EmptyTypes) != null);
+    }
+
+    #endregion
+
+    #region Main Analysis Methods
+
+    private static void AnalyzeType(Type type, StringBuilder report)
+    {
+        if (HasAnyUnsafeMethod(type))
+        {
+            LogAndPrint(report, $"Type: {type.FullName} - Skipped (contains unsafe method)");
+            // return;
+        }
+        
+        TestStaticConstructor(type, report);
+        object instance = CreateInstanceWithFallback(type, report);
+        TestMemberwiseClone(type, instance, report);
+        TestMethods(type, instance, report);
+        TestProperties(type, instance, report);
+        TestCustomAttributesAndFields(type, instance, report);
+        TestNestedTypes(type, report);
+    }
+
+    private static void TestStaticConstructor(Type type, StringBuilder report)
+    {
+        try
+        {
+            RuntimeHelpers.RunClassConstructor(type.TypeHandle);
+            LogAndPrint(report, $"  {type.FullName} static constructor - Invoked successfully");
+        }
+        catch (Exception ex)
+        {
+            LogAndPrint(report, $"  {type.FullName} static constructor - Failed: {ex.Message}");
+        }
+    }
+
+    private static object CreateInstanceWithFallback(Type type, StringBuilder report)
+    {
+        object instance = null;
+        bool created = false;
+        if (!type.IsAbstract && !type.IsInterface)
+        {
+            foreach (ConstructorInfo ctor in type.GetConstructors(BindingFlags.Public | BindingFlags.Instance |
+                                                                  BindingFlags.NonPublic))
+            {
+                var parameters = ctor.GetParameters();
+                bool skip = false;
+                object[] args = new object[parameters.Length];
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    var p = parameters[i];
+                    object val = p.HasDefaultValue
+                        ? p.DefaultValue ?? GetDefault(p.ParameterType)
+                        : GetDefault(p.ParameterType);
+                    args[i] = val;
+                    if (val == null && !(p.ParameterType.IsValueType ||
+                                         (p.ParameterType.IsByRef && p.ParameterType.GetElementType().IsValueType)))
+                    {
+                        skip = true;
+                        break;
+                    }
+                }
+
+                if (skip)
+                {
+                    LogAndPrint(report, $"  Skipped constructor of {type.FullName} due to unsupported parameters");
+                    continue;
+                }
+
+                try
+                {
+                    instance = ctor.Invoke(args);
+                    LogAndPrint(report, $"  Created instance of {type.FullName} using constructor");
+                    created = true;
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogAndPrint(report, $"  Constructor of {type.FullName} threw exception: {ex.Message}");
+                }
+            }
+
+            if (!created)
+            {
+                try
+                {
+                    instance = FormatterServices.GetUninitializedObject(type);
+                    created = true;
+                    LogAndPrint(report,
+                        $"  Created instance of {type.FullName} using FormatterServices.GetUninitializedObject");
+                }
+                catch (Exception ex)
+                {
+                    LogAndPrint(report,
+                        $"  Failed to create instance of {type.FullName} using FormatterServices: {ex.Message}");
+                }
+            }
+        }
+        else
+        {
+            LogAndPrint(report, $"  Skipped instance creation for {type.FullName} (abstract/interface)");
+        }
+
+        if (instance is IDisposable disposable)
+        {
+            try
+            {
+                disposable.Dispose();
+                LogAndPrint(report, $"  {type.FullName} instance disposed successfully");
+            }
+            catch (Exception ex)
+            {
+                LogAndPrint(report, $"  {type.FullName} Dispose() failed: {ex.Message}");
+            }
+        }
+
+        return instance;
+    }
+
+    private static void TestMemberwiseClone(Type type, object instance, StringBuilder report)
+    {
+        if (instance != null)
+        {
+            try
+            {
+                MethodInfo cloneMethod =
+                    type.GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (cloneMethod != null)
+                {
+                    var clone = cloneMethod.Invoke(instance, null);
+                    LogAndPrint(report, $"  {type.FullName} MemberwiseClone - Success, clone: {clone}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogAndPrint(report, $"  {type.FullName} MemberwiseClone failed: {ex.Message}");
+            }
+        }
+    }
+
+    private static void TestMethods(Type type, object instance, StringBuilder report)
+    {
+        foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                                      BindingFlags.Instance | BindingFlags.Static))
+        {
+            if (method.IsConstructor) continue;
+            if (IsDangerousSignature(method))
+            {
+                LogAndPrint(report, $"  Skipped {type.FullName}.{method.Name} (dangerous signature)");
+                continue;
+            }
+            
+            MethodInfo methodToInvoke = method;
+            if (methodToInvoke.ContainsGenericParameters)
+            {
+                var combos = GetGenericCombinations(methodToInvoke.GetGenericArguments());
+                if (combos.Count == 0)
+                {
+                    LogAndPrint(report,
+                        $"  Skipped generic method {type.FullName}.{methodToInvoke.Name} - no suitable type arguments");
+                    continue;
+                }
+
+                try
+                {
+                    methodToInvoke = methodToInvoke.MakeGenericMethod(combos[0]);
+                }
+                catch (Exception ex)
+                {
+                    LogAndPrint(report,
+                        $"  Skipped generic method {type.FullName}.{methodToInvoke.Name} - {ex.Message}");
+                    continue;
+                }
+            }
+
+            if (!methodToInvoke.IsStatic && instance == null)
+            {
+                LogAndPrint(report,
+                    $"  Skipped {type.FullName}.{methodToInvoke.Name} (instance method, no instance available)");
+                continue;
+            }
+
+            var paramInfos = methodToInvoke.GetParameters();
+            object[] parameters = new object[paramInfos.Length];
+            bool skipMethod = false;
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                var p = paramInfos[i];
+                if (IsDangerousType(p.ParameterType))
+                {
+                    skipMethod = true;
+                    break;
+                }
+                object val;
+                if (p.IsOut)
+                {
+                    Type elemType = p.ParameterType.GetElementType();
+                    val = (elemType != null && elemType.IsValueType) ? Activator.CreateInstance(elemType) : null;
+                }
+                else if (p.ParameterType.IsByRef)
+                {
+                    Type elemType = p.ParameterType.GetElementType();
+                    val = GetDefault(elemType);
+                }
+                else
+                {
+                    val = p.HasDefaultValue
+                        ? p.DefaultValue ?? GetDefault(p.ParameterType)
+                        : GetDefault(p.ParameterType);
+                }
+
+                parameters[i] = val;
+                if (!p.IsOut && val == null && !(p.ParameterType.IsValueType ||
+                                                 (p.ParameterType.IsByRef &&
+                                                  p.ParameterType.GetElementType().IsValueType)))
+                {
+                    skipMethod = true;
+                    break;
+                }
+            }
+
+            if (skipMethod)
+            {
+                LogAndPrint(report,
+                    $"  Skipped call to {type.FullName}.{methodToInvoke.Name} due to unsupported parameter values");
+                continue;
+            }
+
+            try
+            {
+                // Выполняем вызов метода в отдельном задании с таймаутом
+                var task = System.Threading.Tasks.Task.Factory.StartNew(() =>
+                {
+                    return methodToInvoke.Invoke(methodToInvoke.IsStatic ? null : instance, parameters);
+                });
+
+                if (!task.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    LogAndPrint(report,
+                        $"  {type.FullName}.{methodToInvoke.Name} - Timeout after 5 seconds, skipping execution");
+                    continue;
+                }
+
+                var result = task.Result;
+                LogAndPrint(report,
+                    $"  {type.FullName}.{methodToInvoke.Name} - Success (Params: [{string.Join(", ", parameters.Select(x => x ?? "null"))}]) Result: {result}");
+                if (result != null)
+                {
+                    try
+                    {
+                        LogAndPrint(report, $"    Result.ToString(): {result.ToString()}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogAndPrint(report, $"    Result.ToString() failed: {ex.Message}");
+                    }
+
+                    try
+                    {
+                        LogAndPrint(report, $"    Result.GetHashCode(): {result.GetHashCode()}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogAndPrint(report, $"    Result.GetHashCode() failed: {ex.Message}");
+                    }
+
+                    try
+                    {
+                        LogAndPrint(report, $"    Result.Equals(result): {result.Equals(result)}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogAndPrint(report, $"    Result.Equals(result) failed: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogAndPrint(report, $"  {type.FullName}.{methodToInvoke.Name} - Failed Error: {ex.Message}");
+            }
+        }
+    }
+
+    private static List<Type[]> GetGenericCombinations(Type[] genericParams)
+    {
+        var results = new List<Type[]>();
+        var candidateLists = new List<List<Type>>();
+
+        foreach (Type param in genericParams)
+        {
+            var candidates = GetCandidateTypesForParam(param);
+            if (candidates == null || candidates.Count == 0)
+                return new List<Type[]>();
+            candidateLists.Add(candidates);
+        }
+
+        var primaryCombo = candidateLists.Select(list => list[0]).ToArray();
+        results.Add(primaryCombo);
+
+        for (int j = 0; j < candidateLists.Count; j++)
+        {
+            if (candidateLists[j].Count > 1)
+            {
+                var altCombo = (Type[]) primaryCombo.Clone();
+                altCombo[j] = candidateLists[j][1];
+                results.Add(altCombo);
+                break;
+            }
+        }
+
+        return results;
+    }
+
+    private static List<Type[]> GetTypeArgCombos(Type genericType)
+    {
+        return genericType.IsGenericTypeDefinition
+            ? GetGenericCombinations(genericType.GetGenericArguments())
+            : new List<Type[]>();
+    }
+
+    private static void TestProperties(Type type, object instance, StringBuilder report)
+    {
+        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance |
+                                            BindingFlags.Static);
+        foreach (var property in properties)
+        {
+            if (property.CanRead && property.GetIndexParameters().Length == 0)
+            {
+                var getter = property.GetMethod;
+                if (getter != null && !IsDangerousSignature(getter))
+                {
+                    try
+                    {
+                        object instForProp = property.GetMethod.IsStatic ? null : instance;
+                        if (instForProp == null && !type.IsAbstract && !type.IsInterface)
+                            instForProp = CreateInstance(type);
+                        var value = property.GetValue(property.GetMethod.IsStatic ? null : instForProp);
+                        LogAndPrint(report, $"  {type.FullName}.{property.Name}.get - Success, Value: {value}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogAndPrint(report, $"  {type.FullName}.{property.Name}.get - Failed: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    LogAndPrint(report, $"  {type.FullName}.{property.Name}.get - Skipped (dangerous signature)");
+                }
+            }
+
+            if (property.CanWrite && property.GetIndexParameters().Length == 0)
+            {
+                var setter = property.SetMethod;
+                if (setter != null && !IsDangerousSignature(setter) && !IsDangerousType(property.PropertyType))
+                {
+                    try
+                    {
+                        object instForProp = property.SetMethod.IsStatic ? null : instance;
+                        if (instForProp == null && !type.IsAbstract && !type.IsInterface)
+                            instForProp = CreateInstance(type);
+                        object valueToSet = GetDefault(property.PropertyType);
+                        property.SetValue(property.SetMethod.IsStatic ? null : instForProp, valueToSet);
+                        LogAndPrint(report,
+                            $"  {type.FullName}.{property.Name}.set - Success, Value set: {valueToSet}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogAndPrint(report, $"  {type.FullName}.{property.Name}.set - Failed: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    LogAndPrint(report, $"  {type.FullName}.{property.Name}.set - Skipped (dangerous signature)");
+                }
+            }
+        }
+    }
+
+    private static void TestCustomAttributesAndFields(Type type, object instance, StringBuilder report)
+    {
+        try
+        {
+            var attrs = type.GetCustomAttributes(true);
+            LogAndPrint(report, $"  {type.FullName} custom attributes count: {attrs.Length}");
+        }
+        catch (Exception ex)
+        {
+            LogAndPrint(report, $"  {type.FullName} custom attributes access failed: {ex.Message}");
+        }
+
+        var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance |
+                                    BindingFlags.Static);
+        foreach (var field in fields)
+        {
+            try
+            {
+                object fieldValue = field.IsStatic
+                    ? field.GetValue(null)
+                    : (instance != null ? field.GetValue(instance) : null);
+                LogAndPrint(report, $"  {type.FullName}.{field.Name} field value: {fieldValue}");
+                if (fieldValue != null)
+                {
+                    try
+                    {
+                        LogAndPrint(report, $"    Field.ToString(): {fieldValue.ToString()}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogAndPrint(report, $"    Field.ToString() failed: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogAndPrint(report, $"  {type.FullName}.{field.Name} field access failed: {ex.Message}");
+            }
+        }
+    }
+
+    private static void TestNestedTypes(Type type, StringBuilder report)
+    {
+        var nestedTypes = type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic);
+        foreach (var nested in nestedTypes)
+        {
+            AnalyzeType(nested, report);
+        }
+    }
+
+    private static bool HasAnyUnsafeMethod(Type type)
+    {
+        try
+        {
+            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+            foreach (var m in methods)
+            {
+                if (IsDangerousSignature(m))
+                    return true;
+            }
+        }
+        catch
+        {
+            // на всякий случай, если reflection бросил — считаем класс небезопасным
+            return true;
+        }
+        return false;
+    }
+
+    private static bool IsDangerousType(Type t)
+    {
+        // Разворачиваем ref T -> T
+        if (t.IsByRef) t = t.GetElementType();
+
+        // Нативные указатели, function pointer, ref struct (Span<T>/ReadOnlySpan<T>/Utf8Span и т.п.)
+        if (t.IsPointer) return true;
+#if NET7_0_OR_GREATER
+        if (t.IsFunctionPointer) return true;
+#endif
+        if (t.IsByRefLike) return true;
+
+        // Generic с ref-like аргументами
+        if (t.IsGenericType)
+        {
+            foreach (var ga in t.GetGenericArguments())
+            {
+                if (IsDangerousType(ga)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsDangerousSignature(MethodBase m)
+    {
+        // abstract/extern/внутренние вызовы CLR/PInvoke
+        if (m.IsAbstract) return true;
+        if (m.IsDefined(typeof(System.Runtime.InteropServices.DllImportAttribute), inherit: false)) return true;
+
+        var impl = m.GetMethodImplementationFlags();
+        if ((impl & MethodImplAttributes.InternalCall) != 0) return true;
+
+        // У extern методов тела нет
+        if (m is MethodInfo mi && mi.GetMethodBody() == null) return true;
+        if (m is ConstructorInfo ci && ci.GetMethodBody() == null) return true;
+
+        // Небезопасные параметры/возврат
+        foreach (var p in m.GetParameters())
+        {
+            var pt = p.ParameterType;
+            // out/ref на ссылочные типы или ref-like/указатели — пропускаем
+            if (IsDangerousType(pt)) return true;
+            if (!p.IsOut && !pt.IsValueType && !pt.IsByRef && pt != typeof(string))
+            {
+                // сложные ссылочные типы мы создаём эвристически; лучше перестраховаться
+                // (можно снять, если хочется смелее вызывать)
+            }
+        }
+
+        if (m is MethodInfo mi2)
+        {
+            var rt = mi2.ReturnType;
+            if (IsDangerousType(rt)) return true;
+        }
+
+        // эвристически пропустим "явно небезопасные" типы/методы
+        var dt = m.DeclaringType?.FullName ?? string.Empty;
+        // if (dt.Contains("System.Runtime.CompilerServices.Unsafe", StringComparison.Ordinal)) return true;
+        // if (m.Name.Contains("Unsafe", StringComparison.Ordinal)) return true;
+
+        // Не трогаем override'ы object.* (часто лезут во внутренности)
+        if (m is MethodInfo mi3 && IsProblematicObjectOverride(mi3))
+            return true;
+
+        return false;
+    }
+
+    private static bool IsProblematicObjectOverride(MethodInfo mi)
+    {
+        // Пропускаем override-ы базовых методов object, они нередко "умные"
+        if (mi == null) return false;
+        var baseDef = mi.GetBaseDefinition();
+        if (baseDef?.DeclaringType == typeof(object))
+        {
+            var name = mi.Name;
+            if (name == nameof(object.ToString) || name == nameof(object.Equals) ||
+                name == nameof(object.GetHashCode) || name == "Finalize")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Exception Unwrap(Exception ex)
+    {
+        if (ex is AggregateException ae)
+            return Unwrap(ae.Flatten().InnerExceptions.Count == 1 ? ae.InnerException! : ae);
+        if (ex is TargetInvocationException tie && tie.InnerException != null) return Unwrap(tie.InnerException);
+        return ex;
+    }
+
+    #endregion
+
+    #region Assembly Resources
+
+    private static void LogAssemblyResources(Assembly assembly, StringBuilder report)
+    {
+        try
+        {
+            var resources = assembly.GetManifestResourceNames();
+            LogAndPrint(report, "Assembly manifest resources: " + string.Join(", ", resources));
+        }
+        catch (Exception ex)
+        {
+            LogAndPrint(report, "Assembly resources access failed: " + ex.Message);
+        }
+    }
+
+    #endregion
+}
