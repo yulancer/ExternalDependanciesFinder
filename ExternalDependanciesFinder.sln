@@ -2,8 +2,6 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependanciesFinder", "ExternalDependanciesFinder\ExternalDependanciesFinder.csproj", "{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NugetUsungProject", "NugetUsungProject\NugetUsungProject.csproj", "{4386EB84-CBE2-4278-BB0A-728E169E2CF8}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Net8Fixer", "Net8Fixer\Net8Fixer.csproj", "{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NuGetAccessChecker", "NuGetAccessChecker\NuGetAccessChecker.csproj", "{BAD102FA-2F51-4332-A850-87D5514098A8}"
@@ -18,6 +16,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CpmMigrator", "CpmMigrator\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NuGetMaxAccessibleVersion", "NuGetMaxAccessibleVersion\NuGetMaxAccessibleVersion.csproj", "{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InitialProjectForUpdate", "InitialProjectForUpdate\InitialProjectForUpdate.csproj", "{33C6585B-36EA-41FB-9F3E-9BAED676E878}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FullListOfUnavailablePackages", "FullListOfUnavailablePackages\FullListOfUnavailablePackages.csproj", "{02849263-8346-4D58-89F7-1F7E5770865F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -28,10 +30,6 @@ Global
 		{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}.Release|Any CPU.Build.0 = Release|Any CPU
-		{4386EB84-CBE2-4278-BB0A-728E169E2CF8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{4386EB84-CBE2-4278-BB0A-728E169E2CF8}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{4386EB84-CBE2-4278-BB0A-728E169E2CF8}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{4386EB84-CBE2-4278-BB0A-728E169E2CF8}.Release|Any CPU.Build.0 = Release|Any CPU
 		{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -60,5 +58,13 @@ Global
 		{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{33C6585B-36EA-41FB-9F3E-9BAED676E878}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{33C6585B-36EA-41FB-9F3E-9BAED676E878}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{33C6585B-36EA-41FB-9F3E-9BAED676E878}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{33C6585B-36EA-41FB-9F3E-9BAED676E878}.Release|Any CPU.Build.0 = Release|Any CPU
+		{02849263-8346-4D58-89F7-1F7E5770865F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{02849263-8346-4D58-89F7-1F7E5770865F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{02849263-8346-4D58-89F7-1F7E5770865F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{02849263-8346-4D58-89F7-1F7E5770865F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
