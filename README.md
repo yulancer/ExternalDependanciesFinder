@@ -20,8 +20,8 @@
 
 | Утилита | Назначение |
 |---|---|
-| `ExternalDependanciesFinder` | Формирует проект со всеми пакетами, включая транзитивные зависимости исходного списка. |
-| `ExternalDependanciesFinder.NugetAccessChecker` | Проверяет доступность пакетов внутри закрытого контура и формирует список недоступных пакетов. |
+| `ExternalDependеnciesFinder` | Формирует проект со всеми пакетами, включая транзитивные зависимости исходного списка. |
+| `ExternalDependеnciesFinder.NugetAccessChecker` | Проверяет доступность пакетов внутри закрытого контура и формирует список недоступных пакетов. |
 | `TestProjectCreator` | Создаёт тестовое решение для указанного списка пакетов и запускает тесты с измерением покрытия. |
 
 ## Общая схема процесса
@@ -39,15 +39,15 @@
 Внешний контур
     |
     | 1. InitialProjectForUpdate.csproj
-    | 2. ExternalDependanciesFinder
+    | 2. ExternalDependеnciesFinder
     v
-NugetUsungProject.csproj
+NugetUsingProject.csproj
     |
     | передать внутрь закрытого контура
     v
 Закрытый контур
     |
-    | 3. ExternalDependanciesFinder.NugetAccessChecker
+    | 3. ExternalDependеnciesFinder.NugetAccessChecker
     v
 unavailable-packages.txt
     |
@@ -104,16 +104,16 @@ dotnet restore InitialProjectForUpdate.csproj
 
 ## Шаг 3. Получить полный список пакетов с транзитивными зависимостями
 
-Запустите `ExternalDependanciesFinder`, передав путь к исходному проекту:
+Запустите `ExternalDependеnciesFinder`, передав путь к исходному проекту:
 
 ```bash
-dotnet run --project path/to/ExternalDependanciesFinder.csproj -- "path/to/InitialProjectForUpdate.csproj"
+dotnet run --project path/to/ExternalDependеnciesFinder.csproj -- "path/to/InitialProjectForUpdate.csproj"
 ```
 
 Или, если утилита уже собрана:
 
 ```bash
-ExternalDependanciesFinder.exe "path/to/InitialProjectForUpdate.csproj"
+ExternalDependеnciesFinder.exe "path/to/InitialProjectForUpdate.csproj"
 ```
 
 Утилита создаёт отдельное решение с проектом, в котором перечислен полный список пакетов, включая транзитивные зависимости.
@@ -121,25 +121,25 @@ ExternalDependanciesFinder.exe "path/to/InitialProjectForUpdate.csproj"
 Ожидаемый результат находится по пути вида:
 
 ```text
-ExternalDependanciesFinder/ExternalDependanciesFinder/bin/Debug/net8.0/NugetUsungSolution/NugetUsungSolution.sln
+ExternalDependеnciesFinder/ExternalDependеnciesFinder/bin/Debug/net8.0/NugetUsingSolution/NugetUsingSolution.sln
 ```
 
 Внутри этого решения находится проект:
 
 ```text
-NugetUsungProject.csproj
+NugetUsingProject.csproj
 ```
 
 Именно этот проект содержит полный список пакетов, которые нужно проверить внутри закрытого контура.
 
-> Примечание: в старой версии утилиты в названии используется `NugetUsungSolution` / `NugetUsungProject`. Если в новой версии имя исправлено на `NugetUsingSolution` / `NugetUsingProject`, используйте актуальное имя файла, созданного утилитой.
+> Примечание: в старой версии утилиты в названии используется `NugetUsingSolution` / `NugetUsingProject`. Если в новой версии имя исправлено на `NugetUsingSolution` / `NugetUsingProject`, используйте актуальное имя файла, созданного утилитой.
 
 ## Шаг 4. Передать полный список пакетов внутрь закрытого контура
 
 Передайте внутрь закрытого контура файл:
 
 ```text
-NugetUsungProject.csproj
+NugetUsingProject.csproj
 ```
 
 Или его актуальный аналог, если имя было исправлено в новой версии утилиты.
@@ -151,13 +151,13 @@ NugetUsungProject.csproj
 В закрытом контуре запустите утилиту:
 
 ```bash
-dotnet run --project path/to/ExternalDependanciesFinder.NugetAccessChecker.csproj -- "path/to/NugetUsungProject.csproj"
+dotnet run --project path/to/ExternalDependеnciesFinder.NugetAccessChecker.csproj -- "path/to/NugetUsingProject.csproj"
 ```
 
 Или, если утилита уже собрана:
 
 ```bash
-ExternalDependanciesFinder.NugetAccessChecker.exe "path/to/NugetUsungProject.csproj"
+ExternalDependеnciesFinder.NugetAccessChecker.exe "path/to/NugetUsingProject.csproj"
 ```
 
 Утилита проверяет, какие пакеты из переданного проекта доступны во внутренних NuGet-источниках закрытого контура.
@@ -178,7 +178,7 @@ ExternalDependanciesFinder.NugetAccessChecker.exe "path/to/NugetUsungProject.csp
 
 ## Шаг 6. Получить отчёт о недоступных пакетах
 
-Результатом работы `ExternalDependanciesFinder.NugetAccessChecker` является файл:
+Результатом работы `ExternalDependеnciesFinder.NugetAccessChecker` является файл:
 
 ```text
 unavailable-packages.txt
@@ -294,7 +294,7 @@ TestSolution.zip
 | Файл | Где создаётся | Назначение |
 |---|---|---|
 | `InitialProjectForUpdate.csproj` | Внешний контур | Исходный список пакетов для проверки. |
-| `NugetUsungProject.csproj` | Внешний контур | Полный список пакетов, включая транзитивные зависимости. |
+| `NugetUsingProject.csproj` | Внешний контур | Полный список пакетов, включая транзитивные зависимости. |
 | `unavailable-packages.txt` | Закрытый контур | Список пакетов, недоступных внутри закрытого контура. |
 | `FullListOfUnavailablePackages.csproj` | Внешний контур | Проект со списком недоступных пакетов для генерации тестов. |
 | `TestSolution` | Внешний контур | Сгенерированное тестовое решение. |
@@ -310,11 +310,11 @@ repo-root/
   FullListOfUnavailablePackages.csproj
   unavailable-packages.txt
   tools/
-    ExternalDependanciesFinder/
-    ExternalDependanciesFinder.NugetAccessChecker/
+    ExternalDependеnciesFinder/
+    ExternalDependеnciesFinder.NugetAccessChecker/
     TestProjectCreator/
   output/
-    NugetUsungSolution/
+    NugetUsingSolution/
     TestSolution/
     TestSolution.zip
 ```
@@ -328,19 +328,19 @@ repo-root/
 ```bash
 dotnet restore InitialProjectForUpdate.csproj
 
-dotnet run --project tools/ExternalDependanciesFinder/ExternalDependanciesFinder.csproj -- "InitialProjectForUpdate.csproj"
+dotnet run --project tools/ExternalDependеnciesFinder/ExternalDependеnciesFinder.csproj -- "InitialProjectForUpdate.csproj"
 ```
 
 После этого передать внутрь закрытого контура:
 
 ```text
-NugetUsungProject.csproj
+NugetUsingProject.csproj
 ```
 
 ### В закрытом контуре
 
 ```bash
-dotnet run --project tools/ExternalDependanciesFinder.NugetAccessChecker/ExternalDependanciesFinder.NugetAccessChecker.csproj -- "NugetUsungProject.csproj"
+dotnet run --project tools/ExternalDependеnciesFinder.NugetAccessChecker/ExternalDependеnciesFinder.NugetAccessChecker.csproj -- "NugetUsingProject.csproj"
 ```
 
 После этого передать наружу закрытого контура:
@@ -369,9 +369,9 @@ Compress-Archive -Path .\TestSolution -DestinationPath .\TestSolution.zip -Force
 
 - [ ] `InitialProjectForUpdate.csproj` содержит исходный список пакетов.
 - [ ] `dotnet restore InitialProjectForUpdate.csproj` успешно выполнен.
-- [ ] `ExternalDependanciesFinder` сформировал проект с полным списком зависимостей.
-- [ ] `NugetUsungProject.csproj` передан внутрь закрытого контура.
-- [ ] В закрытом контуре запущен `ExternalDependanciesFinder.NugetAccessChecker`.
+- [ ] `ExternalDependеnciesFinder` сформировал проект с полным списком зависимостей.
+- [ ] `NugetUsingProject.csproj` передан внутрь закрытого контура.
+- [ ] В закрытом контуре запущен `ExternalDependеnciesFinder.NugetAccessChecker`.
 - [ ] Получен файл `unavailable-packages.txt`.
 - [ ] На основе `unavailable-packages.txt` создан `FullListOfUnavailablePackages.csproj`.
 - [ ] `TestProjectCreator` создал `TestSolution`.

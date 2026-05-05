@@ -23,7 +23,7 @@ const string HelpText = @"ExternalDependenciesFinder
                                    По умолчанию: <scanRoot>/packages_max.txt
 
   --log-dir <path>                 Папка для логов.
-                                   По умолчанию: <scanRoot>/ExternalDependanciesFinder_Logs
+                                   По умолчанию: <scanRoot>/ExternalDependеnciesFinder_Logs
 
   --exclude-prefix <prefix>        Дополнительный префикс пакетов для исключения.
                                    Можно указывать несколько раз или через запятую/точку с запятой.
@@ -69,8 +69,8 @@ if (!Directory.Exists(options.ScanRoot))
 Directory.CreateDirectory(options.LogDirectory);
 
 var report = new ReportWriter(
-    Path.Combine(options.LogDirectory, "ExternalDependanciesFinder_Report.txt"),
-    Path.Combine(options.LogDirectory, "ExternalDependanciesFinder_Errors.txt"),
+    Path.Combine(options.LogDirectory, "ExternalDependеnciesFinder_Report.txt"),
+    Path.Combine(options.LogDirectory, "ExternalDependеnciesFinder_Errors.txt"),
     Path.Combine(options.LogDirectory, "dotnet-list-package.log"));
 
 report.WriteInfo("ExternalDependenciesFinder started");
@@ -481,7 +481,7 @@ internal sealed class Options
         scanRoot = Path.GetFullPath(scanRoot);
         outputDirectory = Path.GetFullPath(outputDirectory);
         packagesOutputPath = Path.GetFullPath(packagesOutputPath ?? Path.Combine(scanRoot, "packages_max.txt"));
-        logDirectory = Path.GetFullPath(logDirectory ?? Path.Combine(scanRoot, "ExternalDependanciesFinder_Logs"));
+        logDirectory = Path.GetFullPath(logDirectory ?? Path.Combine(scanRoot, "ExternalDependеnciesFinder_Logs"));
 
         return new Options
         {

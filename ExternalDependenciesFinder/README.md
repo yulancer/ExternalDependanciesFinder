@@ -1,6 +1,6 @@
-# ExternalDependanciesFinder
+# ExternalDependеnciesFinder
 
-`ExternalDependanciesFinder` — консольная утилита для поиска внешних NuGet-зависимостей в .NET-решении или наборе проектов. Утилита анализирует прямые и транзитивные зависимости, выбирает максимальную версию каждого пакета, сохраняет итоговый список и, при необходимости, создаёт отдельное служебное решение для проверки `restore` и `build`.
+`ExternalDependеnciesFinder` — консольная утилита для поиска внешних NuGet-зависимостей в .NET-решении или наборе проектов. Утилита анализирует прямые и транзитивные зависимости, выбирает максимальную версию каждого пакета, сохраняет итоговый список и, при необходимости, создаёт отдельное служебное решение для проверки `restore` и `build`.
 
 ## Что делает программа
 
@@ -64,25 +64,25 @@ dotnet build -c Release
 ### Базовый запуск
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\MyRepository"
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\MyRepository"
 ```
 
 Или через `dotnet run`:
 
 ```bash
-dotnet run --project ExternalDependanciesFinder -- "C:\Projects\MyRepository"
+dotnet run --project ExternalDependеnciesFinder -- "C:\Projects\MyRepository"
 ```
 
 Если путь не передан, анализируется текущая рабочая директория:
 
 ```bash
-dotnet ExternalDependanciesFinder.dll
+dotnet ExternalDependеnciesFinder.dll
 ```
 
 ## Аргументы командной строки
 
 ```text
-ExternalDependanciesFinder [scanRoot] [options]
+ExternalDependеnciesFinder [scanRoot] [options]
 ```
 
 | Параметр | Описание | По умолчанию |
@@ -90,7 +90,7 @@ ExternalDependanciesFinder [scanRoot] [options]
 | `scanRoot` | Папка для анализа | Текущая директория |
 | `--output-dir <path>` | Папка для служебного решения | `<AppContext.BaseDirectory>/NugetUsingSolution` |
 | `--packages-output <path>` | Путь к файлу со списком пакетов | `<scanRoot>/packages_max.txt` |
-| `--log-dir <path>` | Папка для логов | `<scanRoot>/ExternalDependanciesFinder_Logs` |
+| `--log-dir <path>` | Папка для логов | `<scanRoot>/ExternalDependеnciesFinder_Logs` |
 | `--exclude-prefix <prefix>` | Дополнительный исключаемый префикс пакета | Можно указывать многократно |
 | `--clear-default-excludes` | Очистить стандартные исключения `Rbp.` и `Psb.` | Не применяется |
 | `--framework <tfm>` или `-f <tfm>` | Target framework генерируемого проекта | `net8.0` |
@@ -105,23 +105,23 @@ ExternalDependanciesFinder [scanRoot] [options]
 ### 1. Обычный анализ репозитория
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo"
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo"
 ```
 
 Результат:
 
 ```text
 C:\Projects\Repo\packages_max.txt
-C:\Projects\Repo\ExternalDependanciesFinder_Logs\ExternalDependanciesFinder_Report.txt
-C:\Projects\Repo\ExternalDependanciesFinder_Logs\ExternalDependanciesFinder_Errors.txt
-C:\Projects\Repo\ExternalDependanciesFinder_Logs\dotnet-list-package.log
+C:\Projects\Repo\ExternalDependеnciesFinder_Logs\ExternalDependеnciesFinder_Report.txt
+C:\Projects\Repo\ExternalDependеnciesFinder_Logs\ExternalDependеnciesFinder_Errors.txt
+C:\Projects\Repo\ExternalDependеnciesFinder_Logs\dotnet-list-package.log
 <AppContext.BaseDirectory>\NugetUsingSolution\NugetUsingSolution.sln
 ```
 
 ### 2. Только сформировать список пакетов
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --list-only
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --list-only
 ```
 
 В этом режиме создаётся только файл со списком пакетов и логи. Служебное решение не создаётся.
@@ -129,7 +129,7 @@ dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --list-only
 ### 3. Создать служебное решение в отдельной папке
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --output-dir "D:\Temp\ExternalDeps"
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --output-dir "D:\Temp\ExternalDeps"
 ```
 
 Внимание: папка `--output-dir` пересоздаётся. Если она уже существует, программа удалит её содержимое.
@@ -137,7 +137,7 @@ dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --output-dir "D:\Temp\E
 ### 4. Использовать другой target framework
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --framework net6.0
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --framework net6.0
 ```
 
 Генерируемый проект будет создан командой:
@@ -149,7 +149,7 @@ dotnet new console -n NugetUsingProject --framework net6.0
 ### 5. Проверить только restore, без build
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --no-build
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --no-build
 ```
 
 Программа создаст служебное решение, добавит пакеты и выполнит `dotnet restore`, но не будет запускать `dotnet build`.
@@ -157,7 +157,7 @@ dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --no-build
 ### 6. Исключить дополнительные внутренние пакеты
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --exclude-prefix System.
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --exclude-prefix System.
 ```
 
 По умолчанию уже исключаются:
@@ -170,19 +170,19 @@ Psb.
 Дополнительные префиксы можно передавать несколько раз:
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --exclude-prefix System. --exclude-prefix MyCompany.
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --exclude-prefix System. --exclude-prefix MyCompany.
 ```
 
 Или одним параметром через запятую/точку с запятой:
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --exclude-prefix "System.,MyCompany.;Internal."
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --exclude-prefix "System.,MyCompany.;Internal."
 ```
 
 ### 7. Отключить стандартные исключения
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --clear-default-excludes
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --clear-default-excludes
 ```
 
 В этом случае пакеты `Rbp.*` и `Psb.*` не будут исключаться автоматически.
@@ -190,13 +190,13 @@ dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --clear-default-exclude
 Если нужно заменить стандартные исключения на свои:
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --clear-default-excludes --exclude-prefix System.
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --clear-default-excludes --exclude-prefix System.
 ```
 
 ### 8. Задать свой файл результата
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --packages-output "D:\Reports\packages_max.txt"
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --packages-output "D:\Reports\packages_max.txt"
 ```
 
 ## Логика поиска проектов
@@ -272,7 +272,7 @@ Npgsql => 8.0.3
 Имена можно изменить:
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --solution-name ExternalDepsCheck --project-name ExternalDepsCheckProject
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --solution-name ExternalDepsCheck --project-name ExternalDepsCheckProject
 ```
 
 Служебное решение используется только для проверки, что найденные внешние зависимости можно восстановить и собрать в отдельном минимальном проекте.
@@ -282,21 +282,21 @@ dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --solution-name Externa
 По умолчанию логи пишутся в:
 
 ```text
-<scanRoot>/ExternalDependanciesFinder_Logs/
+<scanRoot>/ExternalDependеnciesFinder_Logs/
 ```
 
 Создаются файлы:
 
 | Файл | Назначение |
 |---|---|
-| `ExternalDependanciesFinder_Report.txt` | Общий отчёт: параметры запуска, команды, коды возврата, этапы работы |
-| `ExternalDependanciesFinder_Errors.txt` | Ошибки `dotnet list`, `dotnet add package`, `restore`, `build` и ошибки парсинга |
+| `ExternalDependеnciesFinder_Report.txt` | Общий отчёт: параметры запуска, команды, коды возврата, этапы работы |
+| `ExternalDependеnciesFinder_Errors.txt` | Ошибки `dotnet list`, `dotnet add package`, `restore`, `build` и ошибки парсинга |
 | `dotnet-list-package.log` | Полный stdout/stderr команды `dotnet list package --include-transitive` по каждой цели |
 
 Папку логов можно изменить:
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --log-dir "D:\Reports\ExternalDepsLogs"
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\Repo" --log-dir "D:\Reports\ExternalDepsLogs"
 ```
 
 ## Структура обновлённого кода
@@ -337,7 +337,7 @@ dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --log-dir "D:\Reports\E
 3. Запустить анализ:
 
    ```bash
-   dotnet ExternalDependanciesFinder.dll "C:\Projects\MyRepository"
+   dotnet ExternalDependеnciesFinder.dll "C:\Projects\MyRepository"
    ```
 
 4. Проверить результат:
@@ -349,9 +349,9 @@ dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --log-dir "D:\Reports\E
 5. При ошибках посмотреть логи:
 
    ```text
-   C:\Projects\MyRepository\ExternalDependanciesFinder_Logs\ExternalDependanciesFinder_Report.txt
-   C:\Projects\MyRepository\ExternalDependanciesFinder_Logs\ExternalDependanciesFinder_Errors.txt
-   C:\Projects\MyRepository\ExternalDependanciesFinder_Logs\dotnet-list-package.log
+   C:\Projects\MyRepository\ExternalDependеnciesFinder_Logs\ExternalDependеnciesFinder_Report.txt
+   C:\Projects\MyRepository\ExternalDependеnciesFinder_Logs\ExternalDependеnciesFinder_Errors.txt
+   C:\Projects\MyRepository\ExternalDependеnciesFinder_Logs\dotnet-list-package.log
    ```
 
 ## Рекомендуемый запуск для быстрого отчёта
@@ -359,11 +359,11 @@ dotnet ExternalDependanciesFinder.dll "C:\Projects\Repo" --log-dir "D:\Reports\E
 Если нужно только получить список внешних зависимостей без проверки служебного решения:
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\MyRepository" --list-only
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\MyRepository" --list-only
 ```
 
 ## Рекомендуемый запуск для проверки restore без полной сборки
 
 ```bash
-dotnet ExternalDependanciesFinder.dll "C:\Projects\MyRepository" --no-build --output-dir "D:\Temp\ExternalDepsCheck"
+dotnet ExternalDependеnciesFinder.dll "C:\Projects\MyRepository" --no-build --output-dir "D:\Temp\ExternalDepsCheck"
 ```
