@@ -23,13 +23,13 @@ const string HelpText = @"ExternalDependenciesFinder
                                    По умолчанию: <scanRoot>/packages_max.txt
 
   --log-dir <path>                 Папка для логов.
-                                   По умолчанию: <scanRoot>/ExternalDependеnciesFinder_Logs
+                                   По умолчанию: <scanRoot>/ExternalDependenciesFinder_Logs
 
   --exclude-prefix <prefix>        Дополнительный префикс пакетов для исключения.
                                    Можно указывать несколько раз или через запятую/точку с запятой.
-                                   По умолчанию уже исключаются Rbp. и Psb.
+                                   По умолчанию ничего не исключается.
 
-  --clear-default-excludes         Очистить стандартные исключения Rbp. и Psb.
+  --clear-default-excludes         Очистить список исключений (оставлен для совместимости)
 
   --framework, -f <tfm>            Target framework для генерируемого проекта.
                                    По умолчанию: net8.0
@@ -69,8 +69,8 @@ if (!Directory.Exists(options.ScanRoot))
 Directory.CreateDirectory(options.LogDirectory);
 
 var report = new ReportWriter(
-    Path.Combine(options.LogDirectory, "ExternalDependеnciesFinder_Report.txt"),
-    Path.Combine(options.LogDirectory, "ExternalDependеnciesFinder_Errors.txt"),
+    Path.Combine(options.LogDirectory, "ExternalDependenciesFinder_Report.txt"),
+    Path.Combine(options.LogDirectory, "ExternalDependenciesFinder_Errors.txt"),
     Path.Combine(options.LogDirectory, "dotnet-list-package.log"));
 
 report.WriteInfo("ExternalDependenciesFinder started");
@@ -364,7 +364,7 @@ static bool IsInsideDirectory(string filePath, string directoryPath)
 
 internal sealed class Options
 {
-    private static readonly string[] DefaultExcludePrefixes = { "Rbp.", "Psb." };
+    private static readonly string[] DefaultExcludePrefixes = Array.Empty<string>();
 
     public string ScanRoot { get; private init; } = Directory.GetCurrentDirectory();
     public string OutputDirectory { get; private init; } = Path.Combine(AppContext.BaseDirectory, "NugetUsingSolution");
@@ -481,7 +481,7 @@ internal sealed class Options
         scanRoot = Path.GetFullPath(scanRoot);
         outputDirectory = Path.GetFullPath(outputDirectory);
         packagesOutputPath = Path.GetFullPath(packagesOutputPath ?? Path.Combine(scanRoot, "packages_max.txt"));
-        logDirectory = Path.GetFullPath(logDirectory ?? Path.Combine(scanRoot, "ExternalDependеnciesFinder_Logs"));
+        logDirectory = Path.GetFullPath(logDirectory ?? Path.Combine(scanRoot, "ExternalDependenciesFinder_Logs"));
 
         return new Options
         {
