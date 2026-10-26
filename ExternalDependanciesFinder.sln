@@ -1,5 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependenciesFinder", "ExternalDependenciesFinder\ExternalDependenciesFinder.csproj", "{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Net8Fixer", "Net8Fixer\Net8Fixer.csproj", "{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}"
@@ -26,6 +27,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	ProjectSection(SolutionItems) = preProject
 		README.md = README.md
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependenciesFinder.Tests", "ExternalDependenciesFinder.Tests\ExternalDependenciesFinder.Tests.csproj", "{B8EBDEF1-363A-488D-987F-92B49D403291}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -77,5 +80,9 @@ Global
 		{F26238AF-A7F7-4A42-9D9A-E81E1A68E5C0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F26238AF-A7F7-4A42-9D9A-E81E1A68E5C0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F26238AF-A7F7-4A42-9D9A-E81E1A68E5C0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B8EBDEF1-363A-488D-987F-92B49D403291}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B8EBDEF1-363A-488D-987F-92B49D403291}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B8EBDEF1-363A-488D-987F-92B49D403291}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B8EBDEF1-363A-488D-987F-92B49D403291}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
