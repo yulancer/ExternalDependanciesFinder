@@ -5,10 +5,11 @@
         <TargetFramework>net6.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <RootNamespace>NuGetAccessChecker</RootNamespace>
+        <LangVersion>10.0</LangVersion>
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Пакеты NuGet.Client для работы с источниками и загрузкой .nupkg -->
         <PackageReference Include="NuGet.Protocol" Version="4.3.1" />
         <PackageReference Include="NuGet.Frameworks" Version="4.3.1" />
         <PackageReference Include="NuGet.Configuration" Version="4.3.1" />
