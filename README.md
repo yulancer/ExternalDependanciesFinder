@@ -51,15 +51,15 @@ dotnet run --project ExternalDependenciesFinder -- --packages-file initial-packa
 dotnet run --project NuGetAccessChecker -- --packages packages_max.txt --list unavailable-packages.txt --output unavailable-packages-report.txt
 ```
 
-Если в `unavailable-packages.txt` нет пакетов, процесс закончен. Иначе на том же контуре список вписывается в CSV-шаблон `form.csv` (преамбула, заголовки, одна строка-образец):
+Если в `unavailable-packages.txt` нет пакетов, процесс закончен. Иначе на том же контуре список вписывается в CSV-шаблон `Опросник.csv` (Скачивается из задачи ФСТЕК):
 
 ```bash
-dotnet run --project NugetToCsv -- --packages unavailable-packages.txt --template form.csv --output unavailable-packages.csv
+dotnet run --project NugetToCsv -- --packages unavailable-packages.txt --template Опросник.csv --output Опросник-Filled.csv
 ```
 
-`unavailable-packages.csv` передаётся наружу. Пошаговый регламент: [docs/closed-loop-procedure.md](docs/closed-loop-procedure.md).
+`Опросник-Filled.csv` Переименовывается обратно в Опросник и прикрепляется к задаче ФСТЕК.
 
-## Исключение внутренних пакетов
+## Исключение внутренних пакетов~~~~
 
 По умолчанию уже исключаются пакеты с префиксами `Rbp.` и `Psb.` Дополнительные префиксы задаются так:
 
