@@ -16,9 +16,6 @@
 | `ExternalDependenciesFinder` | Собирает полный список внешних зависимостей, включая транзитивные, выбирает максимальную версию каждого пакета и записывает её в текстовый файл. Источник — папка с проектами или текстовый список |
 | `NuGetAccessChecker` | Проверяет, какие пакеты из текстового списка или проекта доступны во внутренних NuGet-источниках, и записывает недоступные в текстовый файл |
 | `NuGetMaxAccessibleVersion` | Находит максимальную версию пакета, доступную в заданных источниках |
-| `TestProjectCreator` | Отдельная утилита: создаёт тестовое решение по списку пакетов. В процессе закрытого контура не используется |
-| `FullListOfUnavailablePackages` | Старый проект-контейнер списка. В текущем процессе вместо него используется текстовый файл |
-| `InitialProjectForUpdate` | Старый проект-контейнер списка. В текущем процессе вместо него используется текстовый файл |
 | `CpmMigrator` | Переводит решение на Central Package Management (`Directory.Packages.props`) |
 | `PropsNormalizer` | Нормализует и сортирует `Directory.Build.props` / `Directory.Packages.props` |
 | `Net8Fixer` | Правит целевые платформы и типовые несовместимости при переходе на .NET 8 |
@@ -40,25 +37,34 @@ dotnet run --project ExternalDependenciesFinder -- "C:\Projects\MyRepository" --
 
 Между контурами передаётся текстовый список `PackageId => Version`. Итог — заполненный CSV. Проекты вручную не правятся.
 
+Во внешнем контуре из `initial-packages.txt` собирается полный список, включая транзитивные зависимости. Папка `seed-restore` служебная, её не передают.
+
 ```bash
 dotnet run --project ExternalDependenciesFinder -- --packages-file initial-packages.txt --framework net8.0 --packages-output packages_max.txt
+```
+
+`packages_max.txt` передаётся внутрь. Там `NuGet.config` должен содержать только внутренние источники.
+
+```bash
 dotnet run --project NuGetAccessChecker -- --packages packages_max.txt --list unavailable-packages.txt --output unavailable-packages-report.txt
+```
+
+Если в `unavailable-packages.txt` нет пакетов, процесс закончен. Иначе на том же контуре список вписывается в CSV-шаблон `form.csv` (преамбула, заголовки, одна строка-образец):
+
+```bash
 dotnet run --project NugetToCsv -- --packages unavailable-packages.txt --template form.csv --output unavailable-packages.csv
 ```
 
-Пошаговый регламент: [docs/closed-loop-procedure.md](docs/closed-loop-procedure.md).
+`unavailable-packages.csv` передаётся наружу. Пошаговый регламент: [docs/closed-loop-procedure.md](docs/closed-loop-procedure.md).
 
 ## Исключение внутренних пакетов
 
-Внутренние пакеты организации из отчёта нужно убирать, иначе они попадут в список
-внешних зависимостей. Список префиксов задаётся под конкретный контур:
+По умолчанию уже исключаются пакеты с префиксами `Rbp.` и `Psb.` Дополнительные префиксы задаются так:
 
 ```bash
 dotnet run --project ExternalDependenciesFinder -- "C:\Projects\Repo" \
   --exclude-prefix "MyCompany.,Internal."
 ```
-
-По умолчанию исключений нет.
 
 ## Требования
 

@@ -93,7 +93,7 @@ ExternalDependenciesFinder [scanRoot] [options]
 | `--packages-output <path>` | Путь к файлу со списком пакетов | `<scanRoot>/packages_max.txt` |
 | `--log-dir <path>` | Папка для логов | `<scanRoot>/ExternalDependenciesFinder_Logs` |
 | `--exclude-prefix <prefix>` | Дополнительный исключаемый префикс пакета | Можно указывать многократно |
-| `--clear-default-excludes` | Очистить список исключений (оставлен для совместимости) | Не применяется |
+| `--clear-default-excludes` | Убрать стандартные исключения `Rbp.` и `Psb.` | Исключения включены |
 | `--framework <tfm>` или `-f <tfm>` | Target framework генерируемого проекта | `net8.0` |
 | `--solution-name <name>` | Имя генерируемого решения | `NugetUsingSolution` |
 | `--project-name <name>` | Имя генерируемого проекта | `NugetUsingProject` |
@@ -175,7 +175,7 @@ dotnet ExternalDependenciesFinder.dll "C:\Projects\Repo" --no-build
 dotnet ExternalDependenciesFinder.dll "C:\Projects\Repo" --exclude-prefix System.
 ```
 
-По умолчанию исключений нет: список внутренних префиксов задаётся под конкретный контур через `--exclude-prefix`.
+По умолчанию уже исключаются пакеты с префиксами `Rbp.` и `Psb.` Дополнительные префиксы задаются через `--exclude-prefix`.
 
 Дополнительные префиксы можно передавать несколько раз:
 
@@ -195,7 +195,7 @@ dotnet ExternalDependenciesFinder.dll "C:\Projects\Repo" --exclude-prefix "Syste
 dotnet ExternalDependenciesFinder.dll "C:\Projects\Repo" --clear-default-excludes
 ```
 
-Параметр оставлен для обратной совместимости: список исключений по умолчанию пуст.
+Команда убирает стандартные исключения `Rbp.` и `Psb.`
 
 Если нужно заменить стандартные исключения на свои:
 
