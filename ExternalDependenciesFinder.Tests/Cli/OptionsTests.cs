@@ -96,6 +96,27 @@ public sealed class OptionsTests
     }
 
     [Fact]
+    public void Parse_PackagesFile_PlacesOutputsNextToTheFile()
+    {
+        var packagesFile = Path.Combine(Path.GetTempPath(), "initial-packages.txt");
+        var options = Options.Parse(["--packages-file", packagesFile, "--framework", "net6.0"]);
+
+        Assert.Equal(Path.GetFullPath(packagesFile), options.PackagesFile);
+        Assert.Equal("net6.0", options.Framework);
+        Assert.EndsWith("seed-restore", options.OutputDirectory);
+        Assert.Equal(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(packagesFile))!, "packages_max.txt"), options.PackagesOutputPath);
+    }
+
+    [Fact]
+    public void Parse_PackagesFile_RejectsScanRoot()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            Options.Parse([Path.GetTempPath(), "--packages-file", "packages.txt"]));
+
+        Assert.Contains("--packages-file", ex.Message);
+    }
+
+    [Fact]
     public void Parse_Throws_OnMultipleScanRoots()
     {
         var ex = Assert.Throws<ArgumentException>(() => Options.Parse(["C:\\a", "C:\\b"]));

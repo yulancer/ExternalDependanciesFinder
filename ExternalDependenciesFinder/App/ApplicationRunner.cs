@@ -11,6 +11,7 @@ public sealed class ApplicationRunner
     private readonly IPackageCollector _collector;
     private readonly PackagesFileWriter _packagesFileWriter;
     private readonly IValidationSolutionGenerator _solutionGenerator;
+    private readonly ISeedProjectPreparer _seedPreparer;
 
     public ApplicationRunner(
         Options options,
@@ -18,13 +19,15 @@ public sealed class ApplicationRunner
         IProcessRunner runner,
         IPackageCollector? collector = null,
         PackagesFileWriter? packagesFileWriter = null,
-        IValidationSolutionGenerator? solutionGenerator = null)
+        IValidationSolutionGenerator? solutionGenerator = null,
+        ISeedProjectPreparer? seedPreparer = null)
     {
         _options = options;
         _report = report;
         _collector = collector ?? new PackageCollector(runner, report);
         _packagesFileWriter = packagesFileWriter ?? new PackagesFileWriter();
         _solutionGenerator = solutionGenerator ?? new ValidationSolutionGenerator(runner, report);
+        _seedPreparer = seedPreparer ?? new SeedProjectPreparer(runner, report);
     }
 
     public int Run()
@@ -36,18 +39,36 @@ public sealed class ApplicationRunner
         _report.WriteInfo($"Target framework: {_options.Framework}");
         _report.WriteInfo($"List only: {_options.ListOnly}");
         _report.WriteInfo($"No build: {_options.NoBuild}");
+        _report.WriteInfo($"Packages file: {_options.PackagesFile}");
         _report.WriteInfo($"Excluded prefixes: {string.Join(", ", _options.ExcludePrefixes)}");
 
         try
         {
-            var packages = _collector.Collect(_options);
+            var collectOptions = _options;
+            if (!string.IsNullOrWhiteSpace(_options.PackagesFile))
+            {
+                var seedDir = _seedPreparer.Prepare(_options);
+                var excludeDirectory = Path.Combine(_options.OutputDirectory, "_exclude");
+                collectOptions = _options.WithScanRoot(seedDir, excludeDirectory);
+            }
+
+            var packages = _collector.Collect(collectOptions);
             _packagesFileWriter.Write(_options.PackagesOutputPath, packages, _report);
 
-            if (_options.ListOnly)
+            if (_options.ListOnly || !string.IsNullOrWhiteSpace(_options.PackagesFile))
             {
-                _report.WriteInfo("Mode --list-only enabled. Generated solution step skipped.");
-                Console.WriteLine("\nРежим --list-only: создание служебного решения пропущено.");
-                Console.WriteLine($"Результат сохранён в {_options.PackagesOutputPath}");
+                if (!string.IsNullOrWhiteSpace(_options.PackagesFile))
+                {
+                    _report.WriteInfo("Packages file mode. Generated solution step skipped.");
+                    Console.WriteLine("\nРежим --packages-file: служебный проект использован только для restore.");
+                }
+                else
+                {
+                    _report.WriteInfo("Mode --list-only enabled. Generated solution step skipped.");
+                    Console.WriteLine("\nРежим --list-only: создание служебного решения пропущено.");
+                }
+
+                Console.WriteLine($"Список для передачи: {_options.PackagesOutputPath}");
                 return 0;
             }
 

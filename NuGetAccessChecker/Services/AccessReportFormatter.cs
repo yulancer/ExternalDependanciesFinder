@@ -9,7 +9,7 @@ public sealed class AccessReportFormatter
     {
         var lines = new List<string>
         {
-            $"ПРОЕКТ: {report.ProjectPath}",
+            $"{report.SourceLabel}: {report.ProjectPath}",
             $"ДАТА: {report.GeneratedAt:yyyy-MM-dd HH:mm:ss}",
             "",
             "СТАТИСТИКА:",

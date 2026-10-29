@@ -106,9 +106,19 @@
 
 Запускайте приложение, передавая следующие именованные параметры:
 
+- **--PackagesFile**: Текстовый список пакетов, строка `PackageId => Version`. Вместе с `--DotnetVersion`.
 - **--PackageName**: Имя NuGet-пакета (например, `Newtonsoft.Json`).
 - **--Version**: Версия пакета (например, `13.0.1`).
-- **--DotnetVersion**: Целевая версия .NET (например, `net6.0`).
+- **--DotnetVersion**: Целевая версия .NET (например, `net8.0`).
+- **--ProjectPath**: Путь к `.csproj` со списком `PackageReference`. Вместе с `--DotnetVersion`.
+
+Пример со списком пакетов:
+
+```bash
+dotnet run -- --PackagesFile=unavailable-packages.txt --DotnetVersion=net8.0
+```
+
+После успешного прогона рядом с `TestSolution` создаётся `TestSolution.zip`. Типы с unsafe-методами в сгенерированных тестах пропускаются автоматически.
 
 Пример запуска:
 

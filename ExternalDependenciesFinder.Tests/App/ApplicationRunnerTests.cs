@@ -83,6 +83,44 @@ public sealed class ApplicationRunnerTests : IDisposable
     }
 
     [Fact]
+    public void Run_PackagesFile_WritesListAndSkipsSolution()
+    {
+        var packagesPath = Path.Combine(_root, "packages_max.txt");
+        var options = Options.Parse([
+            "--packages-file", Path.Combine(_root, "initial-packages.txt"),
+            "--packages-output", packagesPath,
+            "--log-dir", Path.Combine(_root, "logs"),
+            "--framework", "net8.0"
+        ]);
+
+        var packages = new Dictionary<string, PackageVersionInfo>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Dapper"] = new PackageVersionInfo("2.1.35", NuGetVersion.Parse("2.1.35"))
+        };
+
+        var report = new RecordingReportWriter();
+        var runner = new FakeProcessRunner();
+        var seedDir = Path.Combine(_root, "seed-restore", "SeedProject");
+        var preparer = Substitute.For<ISeedProjectPreparer>();
+        preparer.Prepare(options).Returns(seedDir);
+
+        var collector = Substitute.For<IPackageCollector>();
+        collector.Collect(Arg.Any<Options>()).Returns(packages);
+
+        var solutionGenerator = Substitute.For<IValidationSolutionGenerator>();
+        var app = new ApplicationRunner(
+            options, report, runner, collector, solutionGenerator: solutionGenerator, seedPreparer: preparer);
+
+        var exitCode = app.Run();
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Dapper => 2.1.35", File.ReadAllText(packagesPath));
+        preparer.Received(1).Prepare(options);
+        collector.Received(1).Collect(Arg.Is<Options>(o => o.ScanRoot == Path.GetFullPath(seedDir)));
+        solutionGenerator.DidNotReceiveWithAnyArgs().Generate(default!, default!);
+    }
+
+    [Fact]
     public void Run_ReturnsOne_WhenUnhandledExceptionOccurs()
     {
         var options = Options.Parse([

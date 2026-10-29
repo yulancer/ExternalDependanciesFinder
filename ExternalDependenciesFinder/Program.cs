@@ -10,7 +10,15 @@ if (options.ShowHelp)
     return 0;
 }
 
-if (!Directory.Exists(options.ScanRoot))
+if (!string.IsNullOrWhiteSpace(options.PackagesFile))
+{
+    if (!File.Exists(options.PackagesFile))
+    {
+        Console.Error.WriteLine($"Файл со списком пакетов не найден: {options.PackagesFile}");
+        return 2;
+    }
+}
+else if (!Directory.Exists(options.ScanRoot))
 {
     Console.Error.WriteLine($"Папка для анализа не найдена: {options.ScanRoot}");
     return 2;

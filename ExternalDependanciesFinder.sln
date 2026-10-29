@@ -32,6 +32,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependenciesFinder.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NuGetAccessChecker.Tests", "NuGetAccessChecker.Tests\NuGetAccessChecker.Tests.csproj", "{DBA836CF-C621-4B60-B4D9-611D72FD84D3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NugetToCsv.Tests", "NugetToCsv.Tests\NugetToCsv.Tests.csproj", "{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -90,5 +92,9 @@ Global
 		{DBA836CF-C621-4B60-B4D9-611D72FD84D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DBA836CF-C621-4B60-B4D9-611D72FD84D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DBA836CF-C621-4B60-B4D9-611D72FD84D3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -171,14 +171,24 @@ CopyNupkgToStreamAsync(...)
 ### Общий вид
 
 ```bash
-dotnet run -- --project <path-to-csproj-or-folder> [--output <output-file>]
+dotnet run -- --packages <packages.txt> [--list <unavailable.txt>] [--output <report.txt>]
+dotnet run -- --project <path-to-csproj-or-folder> [--output <output-file>] [--list <unavailable.txt>]
 ```
+
+### `--packages`
+
+Текстовый список пакетов. Строка: `PackageId => Version`. Пустые строки и строки с `#` пропускаются.
+
+Для `--packages` утилита пишет два файла:
+
+- `--list` — список недоступных пакетов в том же формате. По умолчанию `<папка списка>/unavailable-packages.txt`. Этот файл передаётся дальше.
+- `--output` — подробный отчёт. По умолчанию `<папка списка>/unavailable-packages-report.txt`.
+
+Источники NuGet читаются из каталога файла списка и родительских `NuGet.config`.
 
 ### `--project`
 
-Обязательный параметр.
-
-Путь к `.csproj` или к папке, в которой лежит `.csproj`.
+Путь к `.csproj` или к папке, в которой лежит `.csproj`. Используется, если список передан проектом, а не файлом `--packages`.
 
 Пример с прямым путём к проекту:
 

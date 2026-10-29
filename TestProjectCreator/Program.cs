@@ -15,13 +15,22 @@ namespace TestSolutionMaker.TestProjectCreator
                 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
                 var namedArgs = ParseArguments(args);
+                bool usePackagesFile = namedArgs.ContainsKey("PackagesFile");
                 bool useProjectPath = namedArgs.ContainsKey("ProjectPath");
 
-                if (useProjectPath)
+                if (usePackagesFile && useProjectPath)
+                {
+                    Console.WriteLine("Укажите только один источник пакетов: --PackagesFile или --ProjectPath.");
+                    return -1;
+                }
+
+                if (usePackagesFile || useProjectPath)
                 {
                     if (!namedArgs.ContainsKey("DotnetVersion"))
                     {
-                        Console.WriteLine("Использование: --ProjectPath=<путь.к.csproj> --DotnetVersion=<TFM>");
+                        Console.WriteLine(
+                            "Использование: --PackagesFile=<файл.txt> --DotnetVersion=<TFM>\n" +
+                            "Или: --ProjectPath=<путь.к.csproj> --DotnetVersion=<TFM>");
                         return -1;
                     }
                 }
@@ -32,13 +41,34 @@ namespace TestSolutionMaker.TestProjectCreator
                         !namedArgs.ContainsKey("DotnetVersion"))
                     {
                         Console.WriteLine(
-                            "Использование (1): --PackageName=<Имя пакета> --Version=<Версия> --DotnetVersion=<TFM>\n" +
-                            "Или (2): --ProjectPath=<путь.к.csproj> --DotnetVersion=<TFM>");
+                            "Использование (1): --PackagesFile=<файл.txt> --DotnetVersion=<TFM>\n" +
+                            "Или (2): --PackageName=<Имя пакета> --Version=<Версия> --DotnetVersion=<TFM>\n" +
+                            "Или (3): --ProjectPath=<путь.к.csproj> --DotnetVersion=<TFM>");
                         return -1;
                     }
                 }
 
                 string dotnetVersion = namedArgs["DotnetVersion"];
+
+                // 3) Список пакетов к обработке
+                var packages = new List<(string PackageName, string Version, string ProjectName)>();
+
+                if (usePackagesFile)
+                {
+                    string packagesFile = namedArgs["PackagesFile"];
+                    Console.WriteLine($"Чтение списка пакетов: {packagesFile}");
+                    var discoveredFromFile = ReadPackagesFile(packagesFile);
+                    if (discoveredFromFile.Count == 0)
+                    {
+                        Console.WriteLine("В файле нет пакетов. Создавать тестовое решение не нужно.");
+                        return 0;
+                    }
+
+                    foreach (var p in discoveredFromFile)
+                        packages.Add((p.PackageName, p.Version, BuildProjectName(p.PackageName, p.Version)));
+
+                    Console.WriteLine($"Найдено пакетов: {packages.Count}");
+                }
 
                 // Предупреждения, которые не должны падать выполнение (например, нет PDB)
                 var warnings = new List<string>();
@@ -48,9 +78,6 @@ namespace TestSolutionMaker.TestProjectCreator
 
                 // 2) Создаём решение
                 RunProcessOrThrow("dotnet", "new sln -n TestSolution", solutionDir, "Создание решения");
-
-                // 3) Список пакетов к обработке
-                var packages = new List<(string PackageName, string Version, string ProjectName)>();
 
                 if (useProjectPath)
                 {
@@ -74,7 +101,7 @@ namespace TestSolutionMaker.TestProjectCreator
 
                     Console.WriteLine($"Найдено пакетов: {packages.Count}");
                 }
-                else
+                else if (!usePackagesFile)
                 {
                     string packageName = namedArgs["PackageName"];
                     string version = namedArgs["Version"];
@@ -169,7 +196,9 @@ namespace TestSolutionMaker.TestProjectCreator
                 foreach (var dll in dllNamesForCoverage.Distinct(StringComparer.OrdinalIgnoreCase))
                     DisplayCoverageResults(testResultsDir, dll);
 
+                var zipPath = WriteSolutionArchive(solutionDir);
                 Console.WriteLine("Все шаги успешно завершены.");
+                Console.WriteLine($"Архив: {zipPath}");
                 return 0;
             }
             catch (Exception ex)
@@ -201,6 +230,64 @@ namespace TestSolutionMaker.TestProjectCreator
                 return new ProbeResult { HasDll = false, Reason = "ошибка анализа пакета: " + ex.Message };
             }
         }
+        private static string WriteSolutionArchive(string solutionDir)
+        {
+            var parent = Directory.GetParent(solutionDir)?.FullName ?? Directory.GetCurrentDirectory();
+            var zipPath = Path.Combine(parent, "TestSolution.zip");
+            if (File.Exists(zipPath))
+                File.Delete(zipPath);
+
+            using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+            foreach (var file in Directory.EnumerateFiles(solutionDir, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(parent, file).Replace('\\', '/');
+                archive.CreateEntryFromFile(file, relative);
+            }
+
+            return zipPath;
+        }
+
+        private static List<(string PackageName, string Version)> ReadPackagesFile(string path)
+        {
+            if (!File.Exists(path))
+                throw new FileNotFoundException("Файл со списком пакетов не найден: " + path);
+
+            var result = new List<(string, string)>();
+            var lineNo = 0;
+            foreach (var raw in File.ReadAllLines(path))
+            {
+                lineNo++;
+                var line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#"))
+                    continue;
+
+                string id;
+                string version;
+                var arrow = line.IndexOf("=>", StringComparison.Ordinal);
+                if (arrow >= 0)
+                {
+                    id = line.Substring(0, arrow).Trim();
+                    version = line.Substring(arrow + 2).Trim();
+                }
+                else
+                {
+                    var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length != 2)
+                        throw new FormatException($"Строка {lineNo}: ожидается «PackageId => Version». {raw}");
+
+                    id = parts[0];
+                    version = parts[1];
+                }
+
+                if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(version) || version.Contains(' '))
+                    throw new FormatException($"Строка {lineNo}: ожидается «PackageId => Version». {raw}");
+
+                result.Add((id, version));
+            }
+
+            return result;
+        }
+
         // ------------------ режим ProjectPath: парсинг пакетов ------------------
 
         private static List<(string PackageName, string Version)> DiscoverPackagesFromProject(string csprojPath)

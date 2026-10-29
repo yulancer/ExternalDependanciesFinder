@@ -11,10 +11,27 @@ public sealed class Options
     public string Framework { get; private init; } = "net8.0";
     public string SolutionName { get; private init; } = "NugetUsingSolution";
     public string ProjectName { get; private init; } = "NugetUsingProject";
+    public string PackagesFile { get; private init; } = string.Empty;
     public IReadOnlyList<string> ExcludePrefixes { get; private init; } = DefaultExcludePrefixes;
     public bool ListOnly { get; private init; }
     public bool NoBuild { get; private init; }
     public bool ShowHelp { get; private init; }
+
+    public Options WithScanRoot(string scanRoot, string outputDirectoryToExclude) => new()
+    {
+        ScanRoot = Path.GetFullPath(scanRoot),
+        OutputDirectory = Path.GetFullPath(outputDirectoryToExclude),
+        PackagesOutputPath = PackagesOutputPath,
+        LogDirectory = LogDirectory,
+        Framework = Framework,
+        SolutionName = SolutionName,
+        ProjectName = ProjectName,
+        PackagesFile = PackagesFile,
+        ExcludePrefixes = ExcludePrefixes,
+        ListOnly = ListOnly,
+        NoBuild = NoBuild,
+        ShowHelp = ShowHelp
+    };
 
     public bool IsExcluded(string packageId) =>
         ExcludePrefixes.Any(prefix => packageId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
@@ -32,7 +49,9 @@ public sealed class Options
         var showHelp = false;
         string? packagesOutputPath = null;
         string? logDirectory = null;
+        string? packagesFile = null;
         var scanRootWasSet = false;
+        var outputDirectoryWasSet = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -47,6 +66,13 @@ public sealed class Options
             if (arg.Equals("--output-dir", StringComparison.OrdinalIgnoreCase))
             {
                 outputDirectory = RequireValue(args, ref i, arg);
+                outputDirectoryWasSet = true;
+                continue;
+            }
+
+            if (arg.Equals("--packages-file", StringComparison.OrdinalIgnoreCase))
+            {
+                packagesFile = RequireValue(args, ref i, arg);
                 continue;
             }
 
@@ -116,6 +142,20 @@ public sealed class Options
             scanRootWasSet = true;
         }
 
+        if (!string.IsNullOrWhiteSpace(packagesFile) && scanRootWasSet)
+            throw new ArgumentException("Параметр --packages-file не сочетается с путём папки. Укажите только файл со списком пакетов.");
+
+        if (!string.IsNullOrWhiteSpace(packagesFile))
+        {
+            packagesFile = Path.GetFullPath(packagesFile);
+            var packagesDir = Path.GetDirectoryName(packagesFile);
+            if (string.IsNullOrEmpty(packagesDir))
+                packagesDir = Directory.GetCurrentDirectory();
+            scanRoot = packagesDir;
+            if (!outputDirectoryWasSet)
+                outputDirectory = Path.Combine(packagesDir, "seed-restore");
+        }
+
         scanRoot = Path.GetFullPath(scanRoot);
         outputDirectory = Path.GetFullPath(outputDirectory);
         packagesOutputPath = Path.GetFullPath(packagesOutputPath ?? Path.Combine(scanRoot, "packages_max.txt"));
@@ -130,6 +170,7 @@ public sealed class Options
             Framework = framework,
             SolutionName = solutionName,
             ProjectName = projectName,
+            PackagesFile = packagesFile ?? string.Empty,
             ExcludePrefixes = excludePrefixes
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase)

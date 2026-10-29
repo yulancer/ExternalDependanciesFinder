@@ -87,8 +87,9 @@ ExternalDependenciesFinder [scanRoot] [options]
 
 | Параметр | Описание | По умолчанию |
 |---|---|---|
-| `scanRoot` | Папка для анализа | Текущая директория |
-| `--output-dir <path>` | Папка для служебного решения | `<AppContext.BaseDirectory>/NugetUsingSolution` |
+| `scanRoot` | Папка для анализа. Не используется вместе с `--packages-file` | Текущая директория |
+| `--packages-file <path>` | Текстовый список прямых пакетов (`PackageId => Version`). Утилита сама создаёт служебный проект, выполняет restore и записывает полный список. Служебное решение для передачи не создаётся | — |
+| `--output-dir <path>` | Папка служебного проекта или решения. Для `--packages-file` по умолчанию `<папка файла>/seed-restore` | `<AppContext.BaseDirectory>/NugetUsingSolution` |
 | `--packages-output <path>` | Путь к файлу со списком пакетов | `<scanRoot>/packages_max.txt` |
 | `--log-dir <path>` | Папка для логов | `<scanRoot>/ExternalDependenciesFinder_Logs` |
 | `--exclude-prefix <prefix>` | Дополнительный исключаемый префикс пакета | Можно указывать многократно |
@@ -102,7 +103,21 @@ ExternalDependenciesFinder [scanRoot] [options]
 
 ## Примеры запуска
 
-### 1. Обычный анализ репозитория
+### 1. Список пакетов из текстового файла
+
+```bash
+dotnet ExternalDependenciesFinder.dll --packages-file "C:\work\initial-packages.txt" --framework net8.0 --packages-output "C:\work\packages_max.txt"
+```
+
+Файл `initial-packages.txt`:
+
+```text
+Rebus.RabbitMq => 10.1.2
+```
+
+Результат для передачи между контурами — `packages_max.txt`. Папка `seed-restore` создаётся только для restore и передаче не подлежит.
+
+### Обычный анализ репозитория
 
 ```bash
 dotnet ExternalDependenciesFinder.dll "C:\Projects\Repo"
@@ -118,7 +133,7 @@ C:\Projects\Repo\ExternalDependenciesFinder_Logs\dotnet-list-package.log
 <AppContext.BaseDirectory>\NugetUsingSolution\NugetUsingSolution.sln
 ```
 
-### 2. Только сформировать список пакетов
+### Только сформировать список пакетов
 
 ```bash
 dotnet ExternalDependenciesFinder.dll "C:\Projects\Repo" --list-only

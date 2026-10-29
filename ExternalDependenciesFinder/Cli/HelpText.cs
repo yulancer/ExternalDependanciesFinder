@@ -5,19 +5,28 @@ public static class HelpText
     public const string Text = @"ExternalDependenciesFinder
 
 Назначение:
-  Ищет прямые и транзитивные NuGet-зависимости в .NET-решении или наборе *.csproj,
-  выбирает максимальную версию каждого внешнего пакета и, при необходимости,
-  создаёт служебное решение для проверки restore/build.
+  Ищет прямые и транзитивные NuGet-зависимости в .NET-решении, наборе *.csproj
+  или в текстовом списке пакетов. Выбирает максимальную версию каждого внешнего
+  пакета и записывает её в текстовый файл. При анализе папки может создать
+  служебное решение для проверки restore/build.
 
 Использование:
   ExternalDependenciesFinder [scanRoot] [options]
+  ExternalDependenciesFinder --packages-file <packages.txt> [--framework <tfm>]
 
 Аргументы:
   scanRoot                         Папка для анализа. Если не указана, используется текущая папка.
+                                   Не используется вместе с --packages-file.
 
 Параметры:
-  --output-dir <path>              Папка, куда будет создано служебное решение.
-                                   По умолчанию: <AppContext.BaseDirectory>/NugetUsingSolution
+  --packages-file <path>           Текстовый список прямых пакетов (PackageId => Version).
+                                   Утилита сама создаёт служебный проект, выполняет restore
+                                   и записывает полный список, включая транзитивные зависимости.
+                                   Служебное решение для передачи не создаётся.
+
+  --output-dir <path>              Папка служебного проекта или решения.
+                                   По умолчанию для папки: <AppContext.BaseDirectory>/NugetUsingSolution
+                                   По умолчанию для --packages-file: <папка файла>/seed-restore
 
   --packages-output <path>         Путь к итоговому файлу со списком пакетов.
                                    По умолчанию: <scanRoot>/packages_max.txt
@@ -47,9 +56,14 @@ public static class HelpText
   --help, -h                       Показать справку.
 
 Примеры:
+  ExternalDependenciesFinder --packages-file ""C:\work\initial-packages.txt"" --framework net8.0
   ExternalDependenciesFinder ""C:\Projects\Repo""
   ExternalDependenciesFinder ""C:\Projects\Repo"" --list-only
   ExternalDependenciesFinder ""C:\Projects\Repo"" --framework net6.0 --no-build
   ExternalDependenciesFinder ""C:\Projects\Repo"" --exclude-prefix Abdt. --output-dir ""D:\Temp\ExternalDeps""
+
+Формат текстового списка:
+  PackageId => Version
+  Пустые строки и строки, начинающиеся с #, пропускаются.
 ";
 }

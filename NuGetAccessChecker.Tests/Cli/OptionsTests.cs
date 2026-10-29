@@ -22,6 +22,30 @@ public sealed class OptionsTests
     }
 
     [Fact]
+    public void Parse_ReadsPackagesListAndReport()
+    {
+        var options = Options.Parse([
+            "--packages", @"C:\a\packages_max.txt",
+            "--list", @"C:\a\unavailable-packages.txt",
+            "--output", @"C:\a\report.txt"
+        ]);
+
+        Assert.Equal(@"C:\a\packages_max.txt", options.PackagesPath);
+        Assert.Equal(@"C:\a\unavailable-packages.txt", options.ListPath);
+        Assert.Equal(@"C:\a\report.txt", options.OutputPath);
+        Assert.Equal(string.Empty, options.ProjectPath);
+    }
+
+    [Fact]
+    public void Parse_Throws_WhenBothSourcesAreSet()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            Options.Parse(["--project", "App.csproj", "--packages", "packages.txt"]));
+
+        Assert.Contains("--packages", ex.Message);
+    }
+
+    [Fact]
     public void Parse_Throws_WhenProjectMissing()
     {
         var ex = Assert.Throws<ArgumentException>(() => Options.Parse([]));

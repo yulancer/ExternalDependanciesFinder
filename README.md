@@ -13,16 +13,16 @@
 
 | Утилита | Что делает |
 |---|---|
-| `ExternalDependenciesFinder` | Собирает полный список внешних зависимостей решения, включая транзитивные, выбирает максимальную версию каждого пакета и генерирует служебное решение для проверки `restore` и `build` |
-| `NuGetAccessChecker` | Проверяет, какие пакеты из списка доступны во внутренних NuGet-источниках, и формирует отчёт по недоступным |
+| `ExternalDependenciesFinder` | Собирает полный список внешних зависимостей, включая транзитивные, выбирает максимальную версию каждого пакета и записывает её в текстовый файл. Источник — папка с проектами или текстовый список |
+| `NuGetAccessChecker` | Проверяет, какие пакеты из текстового списка или проекта доступны во внутренних NuGet-источниках, и записывает недоступные в текстовый файл |
 | `NuGetMaxAccessibleVersion` | Находит максимальную версию пакета, доступную в заданных источниках |
-| `TestProjectCreator` | Создаёт тестовое решение по списку пакетов и запускает тесты с измерением покрытия |
-| `FullListOfUnavailablePackages` | Проект-контейнер для списка недоступных пакетов |
-| `InitialProjectForUpdate` | Проект-контейнер для исходного списка пакетов |
+| `TestProjectCreator` | Отдельная утилита: создаёт тестовое решение по списку пакетов. В процессе закрытого контура не используется |
+| `FullListOfUnavailablePackages` | Старый проект-контейнер списка. В текущем процессе вместо него используется текстовый файл |
+| `InitialProjectForUpdate` | Старый проект-контейнер списка. В текущем процессе вместо него используется текстовый файл |
 | `CpmMigrator` | Переводит решение на Central Package Management (`Directory.Packages.props`) |
 | `PropsNormalizer` | Нормализует и сортирует `Directory.Build.props` / `Directory.Packages.props` |
 | `Net8Fixer` | Правит целевые платформы и типовые несовместимости при переходе на .NET 8 |
-| `NugetToCsv` | Выгружает список пакетов в CSV для отчётности |
+| `NugetToCsv` | Заполняет CSV-шаблон по текстовому списку недоступных пакетов. Это итог процесса закрытого контура |
 | `GetSha1` | Считает SHA-1 файлов — для сверки артефактов между контурами |
 
 ## Быстрый старт
@@ -38,9 +38,15 @@ dotnet run --project ExternalDependenciesFinder -- "C:\Projects\MyRepository" --
 
 ## Полный процесс для закрытого контура
 
-Пошаговый регламент — от исходного списка пакетов до готового тестового решения,
-с передачей файлов между внешним и закрытым контуром:
-[docs/closed-loop-procedure.md](docs/closed-loop-procedure.md).
+Между контурами передаётся текстовый список `PackageId => Version`. Итог — заполненный CSV. Проекты вручную не правятся.
+
+```bash
+dotnet run --project ExternalDependenciesFinder -- --packages-file initial-packages.txt --framework net8.0 --packages-output packages_max.txt
+dotnet run --project NuGetAccessChecker -- --packages packages_max.txt --list unavailable-packages.txt --output unavailable-packages-report.txt
+dotnet run --project NugetToCsv -- --packages unavailable-packages.txt --template form.csv --output unavailable-packages.csv
+```
+
+Пошаговый регламент: [docs/closed-loop-procedure.md](docs/closed-loop-procedure.md).
 
 ## Исключение внутренних пакетов
 

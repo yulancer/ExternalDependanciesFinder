@@ -3,6 +3,7 @@ namespace NuGetAccessChecker.Models;
 public sealed class AccessCheckReport
 {
     public string ProjectPath { get; init; } = string.Empty;
+    public string SourceLabel { get; init; } = "ПРОЕКТ";
     public DateTime GeneratedAt { get; init; } = DateTime.Now;
     public IReadOnlyList<PackageAccessResult> Results { get; init; } = Array.Empty<PackageAccessResult>();
 

@@ -270,7 +270,7 @@ public class NugetDllAnalyzerTests
         if (HasAnyUnsafeMethod(type))
         {
             LogAndPrint(report, $"Type: {type.FullName} - Skipped (contains unsafe method)");
-            // return;
+            return;
         }
         
         TestStaticConstructor(type, report);
