@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\NuGetAccessChecker\NuGetAccessChecker.csproj" />
+    <ProjectReference Include="..\..\NuGetAccessChecker\NuGetAccessChecker.csproj" />
   </ItemGroup>
 
 </Project>

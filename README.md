@@ -22,6 +22,8 @@
 | `NugetToCsv` | Заполняет CSV-шаблон по текстовому списку недоступных пакетов. Это итог процесса закрытого контура |
 | `GetSha1` | Считает SHA-1 файлов — для сверки артефактов между контурами |
 
+`CpmMigrator`, `PropsNormalizer`, `Net8Fixer`, `GetSha1` и `NuGetMaxAccessibleVersion` лежат в решении [Utils/Utils.sln](Utils/Utils.sln). Тесты — в папке `_Tests`.
+
 ## Быстрый старт
 
 ```bash

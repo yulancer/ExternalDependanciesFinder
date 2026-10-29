@@ -3,30 +3,24 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependenciesFinder", "ExternalDependenciesFinder\ExternalDependenciesFinder.csproj", "{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Net8Fixer", "Net8Fixer\Net8Fixer.csproj", "{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NuGetAccessChecker", "NuGetAccessChecker\NuGetAccessChecker.csproj", "{BAD102FA-2F51-4332-A850-87D5514098A8}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NugetToCsv", "NugetToCsv\NugetToCsv.csproj", "{30050398-5F6B-4761-8AED-B8D333C22212}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GetSha1", "GetSha1\GetSha1.csproj", "{AF1D5B00-6107-45F4-94CD-39C950E68ADE}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PropsNormalizer", "PropsNormalizer\PropsNormalizer.csproj", "{CCA99538-5036-4A5B-9899-BC369866CE6B}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CpmMigrator", "CpmMigrator\CpmMigrator.csproj", "{7B2D78EB-03AA-4B7B-B200-1DDEBE3C88D7}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NuGetMaxAccessibleVersion", "NuGetMaxAccessibleVersion\NuGetMaxAccessibleVersion.csproj", "{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{BADC259B-4ACE-4E04-8017-AA9CAD3C3C1B}"
 	ProjectSection(SolutionItems) = preProject
 		README.md = README.md
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependenciesFinder.Tests", "ExternalDependenciesFinder.Tests\ExternalDependenciesFinder.Tests.csproj", "{B8EBDEF1-363A-488D-987F-92B49D403291}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "_Tests", "_Tests", "{C1A4E8B2-5D17-4F6A-9C30-8E2B7A1D4F56}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NuGetAccessChecker.Tests", "NuGetAccessChecker.Tests\NuGetAccessChecker.Tests.csproj", "{DBA836CF-C621-4B60-B4D9-611D72FD84D3}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "_Tests", "_Tests", "{C1A4E8B2-5D17-4F6A-9C30-8E2B7A1D4F56}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NugetToCsv.Tests", "NugetToCsv.Tests\NugetToCsv.Tests.csproj", "{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExternalDependenciesFinder.Tests", "_Tests\ExternalDependenciesFinder.Tests\ExternalDependenciesFinder.Tests.csproj", "{B8EBDEF1-363A-488D-987F-92B49D403291}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NuGetAccessChecker.Tests", "_Tests\NuGetAccessChecker.Tests\NuGetAccessChecker.Tests.csproj", "{DBA836CF-C621-4B60-B4D9-611D72FD84D3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NugetToCsv.Tests", "_Tests\NugetToCsv.Tests\NugetToCsv.Tests.csproj", "{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -38,10 +32,6 @@ Global
 		{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{ABCB6C19-74EF-4237-8FB5-7DB5CC66363A}.Release|Any CPU.Build.0 = Release|Any CPU
-		{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{E6033B9F-D049-4EAB-AD7C-853FBAC14D36}.Release|Any CPU.Build.0 = Release|Any CPU
 		{BAD102FA-2F51-4332-A850-87D5514098A8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{BAD102FA-2F51-4332-A850-87D5514098A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BAD102FA-2F51-4332-A850-87D5514098A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -50,22 +40,6 @@ Global
 		{30050398-5F6B-4761-8AED-B8D333C22212}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{30050398-5F6B-4761-8AED-B8D333C22212}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{30050398-5F6B-4761-8AED-B8D333C22212}.Release|Any CPU.Build.0 = Release|Any CPU
-		{AF1D5B00-6107-45F4-94CD-39C950E68ADE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{AF1D5B00-6107-45F4-94CD-39C950E68ADE}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{AF1D5B00-6107-45F4-94CD-39C950E68ADE}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{AF1D5B00-6107-45F4-94CD-39C950E68ADE}.Release|Any CPU.Build.0 = Release|Any CPU
-		{CCA99538-5036-4A5B-9899-BC369866CE6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{CCA99538-5036-4A5B-9899-BC369866CE6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CCA99538-5036-4A5B-9899-BC369866CE6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{CCA99538-5036-4A5B-9899-BC369866CE6B}.Release|Any CPU.Build.0 = Release|Any CPU
-		{7B2D78EB-03AA-4B7B-B200-1DDEBE3C88D7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{7B2D78EB-03AA-4B7B-B200-1DDEBE3C88D7}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{7B2D78EB-03AA-4B7B-B200-1DDEBE3C88D7}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{7B2D78EB-03AA-4B7B-B200-1DDEBE3C88D7}.Release|Any CPU.Build.0 = Release|Any CPU
-		{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{37D96EFA-B265-4E1D-9323-48BF3DB8FE2C}.Release|Any CPU.Build.0 = Release|Any CPU
 		{B8EBDEF1-363A-488D-987F-92B49D403291}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{B8EBDEF1-363A-488D-987F-92B49D403291}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B8EBDEF1-363A-488D-987F-92B49D403291}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -78,5 +52,10 @@ Global
 		{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{B8EBDEF1-363A-488D-987F-92B49D403291} = {C1A4E8B2-5D17-4F6A-9C30-8E2B7A1D4F56}
+		{DBA836CF-C621-4B60-B4D9-611D72FD84D3} = {C1A4E8B2-5D17-4F6A-9C30-8E2B7A1D4F56}
+		{7F2C9A14-6E5B-4D18-A3C1-9B8E4F0D2A61} = {C1A4E8B2-5D17-4F6A-9C30-8E2B7A1D4F56}
 	EndGlobalSection
 EndGlobal
